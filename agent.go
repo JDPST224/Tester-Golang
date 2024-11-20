@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -211,6 +210,9 @@ func controlHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/control", controlHandler)
-	fmt.Println("Agent server is running on port 8080")
-	http.ListenAndServe(":8080", nil)
+	fmt.Println("Agent server is running on port 8081")
+	err := http.ListenAndServe(":8081", nil)
+	if err != nil {
+		fmt.Printf("Server error: %v\n", err)
+	}
 }
