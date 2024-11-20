@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,8 +16,7 @@ type Command struct {
 }
 
 var agents = []string{
-	"http://agent1.example.com:8080",
-	"http://agent2.example.com:8080",
+	"http://localhost:8081",
 	// Add more agents here
 }
 
