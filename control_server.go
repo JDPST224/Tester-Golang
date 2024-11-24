@@ -4,15 +4,24 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
+	"strconv"
 	"sync"
+	"time"
 )
 
 type Command struct {
-	Action  string `json:"action"`  // "start" or "stop"
+	Action  string `json:"action"`  // "start"
 	URL     string `json:"url"`     // Target URL
 	Threads int    `json:"threads"` // Number of threads
 	Timer   int    `json:"timer"`   // Duration in seconds
+}
+
+type AgentStatus struct {
+	Online  bool
+	Status  string // "Ready", "Sending"
+	LastPing time.Time
 }
 
 var agents = []string{
@@ -21,8 +30,9 @@ var agents = []string{
 }
 
 var mu sync.Mutex
-var activeAgents = make(map[string]bool)
+var agentStatuses = make(map[string]AgentStatus)
 
+// Send command to an agent
 func sendCommandToAgent(agentURL string, cmd Command) error {
 	body, err := json.Marshal(cmd)
 	if err != nil {
@@ -42,15 +52,113 @@ func sendCommandToAgent(agentURL string, cmd Command) error {
 	return nil
 }
 
-func handleCommand(w http.ResponseWriter, r *http.Request) {
-	var cmd Command
-	if err := json.NewDecoder(r.Body).Decode(&cmd); err != nil {
-		http.Error(w, "Invalid command format", http.StatusBadRequest)
+// Ping agent to update its status
+func pingAgent(agentURL string) {
+	resp, err := http.Get(agentURL + "/status")
+	mu.Lock()
+	defer mu.Unlock()
+	defer func() {
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}()
+
+	if err != nil || resp.StatusCode != http.StatusOK {
+		agentStatuses[agentURL] = AgentStatus{Online: false}
 		return
 	}
 
+	var status struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		agentStatuses[agentURL] = AgentStatus{Online: false}
+		return
+	}
+
+	agentStatuses[agentURL] = AgentStatus{
+		Online:  true,
+		Status:  status.Status,
+		LastPing: time.Now(),
+	}
+}
+
+// Periodically update agent statuses
+func monitorAgents() {
+	for {
+		for _, agent := range agents {
+			pingAgent(agent)
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// Render web interface
+func renderInterface(w http.ResponseWriter, r *http.Request) {
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Control Server</title>
+</head>
+<body>
+	<h1>Control Server</h1>
+	<form method="POST" action="/command">
+		<label>Target URL:</label><br>
+		<input type="text" name="url" required><br><br>
+		<label>Threads:</label><br>
+		<input type="number" name="threads" required><br><br>
+		<label>Timer (seconds):</label><br>
+		<input type="number" name="timer" required><br><br>
+		<button type="submit">Start Test</button>
+	</form>
+	<h2>Agent Status</h2>
+	<table border="1">
+		<tr>
+			<th>Agent</th>
+			<th>Status</th>
+			<th>Online</th>
+			<th>Last Ping</th>
+		</tr>
+		{{range $url, $status := .}}
+		<tr>
+			<td>{{$url}}</td>
+			<td>{{$status.Status}}</td>
+			<td>{{if $status.Online}}Online{{else}}Offline{{end}}</td>
+			<td>{{$status.LastPing}}</td>
+		</tr>
+		{{end}}
+	</table>
+</body>
+</html>
+`
 	mu.Lock()
 	defer mu.Unlock()
+
+	tmplParsed, _ := template.New("interface").Parse(tmpl)
+	tmplParsed.Execute(w, agentStatuses)
+}
+
+// Handle commands from the web interface
+func handleCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	url := r.FormValue("url")
+	threads := r.FormValue("threads")
+	timer := r.FormValue("timer")
+
+	threadsInt, _ := strconv.Atoi(threads)
+	timerInt, _ := strconv.Atoi(timer)
+
+	cmd := Command{
+		Action:  "start",
+		URL:     url,
+		Threads: threadsInt,
+		Timer:   timerInt,
+	}
 
 	// Send the command to all agents
 	for _, agent := range agents {
@@ -60,19 +168,16 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("Failed to send command to %s: %v\n", agent, err)
 			} else {
 				fmt.Printf("Command sent to %s successfully\n", agent)
-				if cmd.Action == "start" {
-					activeAgents[agent] = true
-				} else if cmd.Action == "stop" {
-					delete(activeAgents, agent)
-				}
 			}
 		}(agent)
 	}
 
-	w.Write([]byte("Command dispatched to all agents"))
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func main() {
+	go monitorAgents()
+	http.HandleFunc("/", renderInterface)
 	http.HandleFunc("/command", handleCommand)
 	fmt.Println("Control server is running on port 8080")
 	http.ListenAndServe(":8080", nil)
