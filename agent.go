@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
+	"encoding/json" // Importing the json package
 	"fmt"
 	"math/rand"
 	"net"
@@ -96,43 +96,46 @@ func getHeader() string {
 	return header
 }
 
+func handleConnection(conn net.Conn, header string, ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			conn.Close()
+			return
+		default:
+			// Randomized request sending with delay
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(500)+100)) // Delay between 100ms and 600ms
+			_, err := conn.Write([]byte(header))
+			if err != nil {
+				fmt.Println("Write error:", err)
+				conn.Close()
+				return
+			}
+		}
+	}
+}
 
-func worker(ctx context.Context, id int, wg *sync.WaitGroup, requestCount chan int) {
+func worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 	address := fmt.Sprintf("%s:%d", ip, port)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case count := <-requestCount:
-			var conn net.Conn
-			var err error
-
-			if port == 443 {
-				conn, err = tls.Dial("tcp", address, tlsConfig)
-			} else {
-				conn, err = net.Dial("tcp", address)
-			}
-
-			if err != nil {
-				fmt.Printf("Worker %d: connection error: %v\n", id, err)
-				continue
-			}
-
-			header := getHeader()
-			for i := 0; i < count; i++ {
-				time.Sleep(time.Millisecond * time.Duration(rand.Intn(100))) // Randomized delay
-				_, err := conn.Write([]byte(header))
-				if err != nil {
-					fmt.Printf("Worker %d: write error: %v\n", id, err)
-					break
-				}
-			}
-			conn.Close()
+	// Multiple connections per worker
+	connCount := rand.Intn(5) + 1 // Randomize 1-5 concurrent connections per worker
+	for i := 0; i < connCount; i++ {
+		var conn net.Conn
+		var err error
+		if port == 443 {
+			conn, err = tls.Dial("tcp", address, tlsConfig)
+		} else {
+			conn, err = net.Dial("tcp", address)
 		}
+		if err != nil {
+			fmt.Printf("Worker %d: connection error: %v\n", id, err)
+			continue
+		}
+		go handleConnection(conn, getHeader(), ctx)
 	}
 }
 
@@ -165,34 +168,19 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 	cancelFunc = cancel
 
 	var wg sync.WaitGroup
-	requestCount := make(chan int, threads)
-
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
-		go worker(ctx, i, &wg, requestCount)
+		go worker(ctx, i, &wg)
 	}
 
-	// Dispatch requests to workers
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-
-		for t := 0; t < timer; t++ {
-			<-ticker.C
-			for i := 0; i < threads; i++ {
-				requestCount <- rand.Intn(401) + 200 // Randomized load per thread
-			}
-		}
-		close(requestCount)
-	}()
-
+	// Wait for all workers to finish
 	wg.Wait()
+
 	mu.Lock()
 	activeTest = false
 	mu.Unlock()
 	fmt.Println("Stress test completed.")
 }
-
 
 func controlHandler(w http.ResponseWriter, r *http.Request) {
 	var cmd Command
