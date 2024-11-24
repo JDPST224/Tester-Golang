@@ -64,31 +64,37 @@ func getUserAgent() string {
 	} else if platform == "X11" {
 		os = choice4[rand.Intn(len(choice4))]
 	}
+
 	browser := choice5[rand.Intn(len(choice5))]
-	if browser == "chrome" {
+	switch browser {
+	case "chrome":
 		webkit := strconv.Itoa(rand.Intn(599-500) + 500)
 		version := fmt.Sprintf("%d.0.%d.%d", rand.Intn(99), rand.Intn(9999), rand.Intn(999))
 		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/%s.0 (KHTML, like Gecko) Chrome/%s Safari/%s", os, webkit, version, webkit)
-	} else if browser == "firefox" {
+	case "firefox":
 		version := fmt.Sprintf("%d.0", rand.Intn(99))
 		return fmt.Sprintf("Mozilla/5.0 (%s; rv:%s) Gecko/20100101 Firefox/%s", os, version, version)
-	} else if browser == "edge" {
+	case "edge":
 		version := fmt.Sprintf("%d.0.%d.%d", rand.Intn(99), rand.Intn(9999), rand.Intn(999))
 		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36 Edge/%s", os, version, version)
-	} else if browser == "safari" {
+	case "safari":
 		version := fmt.Sprintf("%d.0", rand.Intn(99))
 		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Version/%s Safari/537.36", os, version)
+	default:
+		return spider[rand.Intn(len(spider))]
 	}
-	return spider[rand.Intn(len(spider))]
 }
 
 func getHeader() string {
+	acceptEncodings := []string{"gzip, deflate", "gzip, deflate, br", "identity"}
+	acceptLanguages := []string{"en-US,en;q=0.5", "en-GB,en;q=0.9", "en;q=0.8,fr;q=0.7", "de,en;q=0.8"}
+
 	header := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
 	header += fmt.Sprintf("Host: %s\r\n", ip)
 	header += fmt.Sprintf("User-Agent: %s\r\n", getUserAgent())
+	header += fmt.Sprintf("Accept-Encoding: %s\r\n", acceptEncodings[rand.Intn(len(acceptEncodings))])
+	header += fmt.Sprintf("Accept-Language: %s\r\n", acceptLanguages[rand.Intn(len(acceptLanguages))])
 	header += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n"
-	header += "Accept-Encoding: gzip, deflate\r\n"
-	header += "Accept-Language: en-US,en;q=0.5\r\n"
 	if cookie != "" {
 		header += fmt.Sprintf("Cookie: %s\r\n", cookie)
 	}
