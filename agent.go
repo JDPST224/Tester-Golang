@@ -95,6 +95,7 @@ func getHeader() string {
 	header += fmt.Sprintf("Accept-Encoding: %s\r\n", acceptEncodings[rand.Intn(len(acceptEncodings))])
 	header += fmt.Sprintf("Accept-Language: %s\r\n", acceptLanguages[rand.Intn(len(acceptLanguages))])
 	header += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n"
+	header += "Referrer: https://google.com/"
 	if cookie != "" {
 		header += fmt.Sprintf("Cookie: %s\r\n", cookie)
 	}
