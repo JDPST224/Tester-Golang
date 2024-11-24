@@ -26,13 +26,6 @@ type AgentStatus struct {
 
 var agents = []string{
 	"http://localhost:8081",
-	"http://localhost:8082",
-	"http://localhost:8083",
-	"http://localhost:8084",
-	"http://localhost:8086",
-	"http://localhost:8087",
-	"http://localhost:804",
-	"http://localhost:8045",
 	// Add more agents here
 }
 
@@ -100,6 +93,15 @@ func monitorAgents() {
 	}
 }
 
+// Serve agent statuses as JSON
+func serveAgentStatuses(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agentStatuses)
+}
+
 // Render web interface
 func renderInterface(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
@@ -110,7 +112,6 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control Server</title>
     <style>
-        /* Ensure body and html allow proper alignment */
         body, html {
             font-family: 'Arial', sans-serif;
             margin: 0;
@@ -119,21 +120,17 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
             color: #f4f4f9;
             height: 100%;
             display: flex;
-            justify-content: center; /* Center horizontally */
-            align-items: flex-start; /* Align to the top initially */
+            justify-content: center;
+            align-items: flex-start;
         }
-
-        /* Main container for all content */
         .main-container {
             width: 90%;
             max-width: 800px;
-            margin-top: 20px; /* Space from the top for better visibility */
+            margin-top: 20px;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
-
-        /* Ensure each section has proper spacing */
         .container {
             display: flex;
             flex-direction: column;
@@ -144,38 +141,26 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
-            margin-bottom: 20px; /* Add margin for spacing */
+            margin-bottom: 20px;
         }
-
-        /* Agent Status table styles */
-        .agent-status {
-            width: 100%;
-            max-height: 300px; /* Limit height to allow scrolling */
-            overflow-y: auto; /* Enable vertical scrolling for the table */
-        }
-
-        form{
+        form {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             width: 100%;
         }
-
-        /* Form spacing tweaks */
         input[type="text"], input[type="number"], button {
-            width: 90%; /* Make inputs and button full width */
+            width: 90%;
             padding: 10px;
-            margin: 10px 0; /* Adjust margin to avoid extra space */
+            margin: 10px 0;
             border: 1px solid #555;
             border-radius: 5px;
             background-color: #1a1a1a;
             color: #f4f4f9;
         }
-
-        /* Button style */
         button {
-            width: 80%; /* Ensure button is full width */
+            width: 80%;
             padding: 10px;
             margin: 10px 0;
             border: 1px solid #555;
@@ -186,33 +171,63 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
             cursor: pointer;
             transition: background-color 0.3s ease;
         }
-
         button:hover {
             background-color: #0056b3;
         }
-
-        /* Heading Styles */
         h1, h2 {
             color: #f4f4f9;
         }
-
-        /* Table styles */
         table {
             width: 100%;
             color: #f4f4f9;
             text-align: left;
             border-collapse: collapse;
         }
-
         table th, table td {
             padding: 8px;
             border: 1px solid #555;
         }
-
         table th {
             background-color: #333;
         }
     </style>
+    <script>
+        async function fetchAgentStatuses() {
+            try {
+                const response = await fetch('/agent-statuses');
+                const data = await response.json();
+
+                const tbody = document.querySelector('.agent-status tbody');
+                tbody.innerHTML = '';
+
+                for (const [url, status] of Object.entries(data)) {
+                    const row = document.createElement('tr');
+
+                    const urlCell = document.createElement('td');
+                    urlCell.textContent = url;
+                    row.appendChild(urlCell);
+
+                    const statusCell = document.createElement('td');
+                    statusCell.textContent = status.Status;
+                    row.appendChild(statusCell);
+
+                    const onlineCell = document.createElement('td');
+                    onlineCell.textContent = status.Online ? 'Online' : 'Offline';
+                    row.appendChild(onlineCell);
+
+                    const lastPingCell = document.createElement('td');
+                    lastPingCell.textContent = new Date(status.LastPing).toLocaleString();
+                    row.appendChild(lastPingCell);
+
+                    tbody.appendChild(row);
+                }
+            } catch (error) {
+                console.error('Failed to fetch agent statuses:', error);
+            }
+        }
+        setInterval(fetchAgentStatuses, 5000);
+        fetchAgentStatuses();
+    </script>
 </head>
 <body>
     <div class="main-container">
@@ -245,15 +260,7 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Data dynamically filled here by the backend -->
-                        {{range $url, $status := .}}
-                        <tr>
-                            <td>{{$url}}</td>
-                            <td>{{$status.Status}}</td>
-                            <td>{{if $status.Online}}Online{{else}}Offline{{end}}</td>
-                            <td>{{$status.LastPing}}</td>
-                        </tr>
-                        {{end}}
+                        <!-- Data dynamically filled here by the frontend -->
                     </tbody>
                 </table>
             </div>
@@ -266,7 +273,7 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
 	defer mu.Unlock()
 
 	tmplParsed, _ := template.New("interface").Parse(tmpl)
-	tmplParsed.Execute(w, agentStatuses)
+	tmplParsed.Execute(w, nil)
 }
 
 // Handle commands from the web interface
@@ -309,6 +316,8 @@ func main() {
 	go monitorAgents()
 	http.HandleFunc("/", renderInterface)
 	http.HandleFunc("/command", handleCommand)
-	fmt.Println("Control server is running on port 8080")
+	http.HandleFunc("/agent-statuses", serveAgentStatuses)
+
+	fmt.Println("Server running on http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 }
