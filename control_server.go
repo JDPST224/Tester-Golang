@@ -27,6 +27,8 @@ type AgentStatus struct {
 var agents = []string{
 	"http://localhost:8081",
 	"https://humble-muskrat-reliably.ngrok-free.app",
+	"https://tidy-notably-vervet.ngrok-free.app",
+	"https://moved-miserably-oryx.ngrok-free.app",
 	// Add more agents here
 }
 
