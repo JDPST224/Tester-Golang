@@ -160,7 +160,7 @@ func startTest(urlStr string, threads, timer int, cookieStr string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timer)*time.Second)
 	cancelFunc = cancel
 
-	workerPool(ctx, threads, 200) // Threads with batch size 10
+	workerPool(ctx, threads, 20) // Threads with batch size 10
 	fmt.Println("Stress test completed.")
 	mu.Lock()
 	activeTest = false
