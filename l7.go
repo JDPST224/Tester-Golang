@@ -12,13 +12,6 @@ import (
 	"time"
 )
 
-import (
-	"fmt"
-	"math/rand"
-	"strconv"
-	"time"
-)
-
 var (
 	ip       string
 	port     int
