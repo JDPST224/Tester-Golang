@@ -97,6 +97,7 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
 
 		header := getHeader()
 		for i := 0; i < count; i++ {
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
 			_, err := conn.Write([]byte(header))
 			if err != nil {
 				fmt.Printf("Worker %d: write error: %v\n", id, err)
