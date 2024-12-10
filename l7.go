@@ -13,23 +13,24 @@ import (
 )
 
 var (
-	ip       string
-	port     int
-	path     string
-	threads  int
-	timer    int
-	cookie   string
-	basePath string
+	ip         string
+	port       int
+	path       string
+	threads    int
+	timer      int
+	cookie     string
+	customHost string // New variable for custom Host header
+	basePath   string
 
 	// More diverse platform choices
 	platformChoices = []string{"Macintosh", "Windows", "X11", "Linux", "iPhone", "Android"}
 
 	// Expanded OS options
-	macOSVersions    = []string{"68K", "PPC", "Intel Mac OS X 10_15_7", "Intel Mac OS X 11_2_3", "Intel Mac OS X 12_4"}
-	windowsVersions  = []string{"Win3.11", "WinNT4.0", "Windows NT 5.1", "Windows NT 6.1", "Windows 7", "Windows 8", "Windows NT 10.0; Win64; x64"}
-	linuxVersions    = []string{"Linux i686", "Linux x86_64", "Ubuntu; Linux x86_64", "Debian; Linux x86_64"}
-	androidVersions  = []string{"Android 9; Pixel 3", "Android 10; Pixel 4 XL", "Android 11; Pixel 5"}
-	iphoneVersions   = []string{"iPhone; CPU iPhone OS 14_4 like Mac OS X", "iPhone; CPU iPhone OS 15_1 like Mac OS X"}
+	macOSVersions   = []string{"68K", "PPC", "Intel Mac OS X 10_15_7", "Intel Mac OS X 11_2_3", "Intel Mac OS X 12_4"}
+	windowsVersions = []string{"Win3.11", "WinNT4.0", "Windows NT 5.1", "Windows NT 6.1", "Windows 7", "Windows 8", "Windows NT 10.0; Win64; x64"}
+	linuxVersions   = []string{"Linux i686", "Linux x86_64", "Ubuntu; Linux x86_64", "Debian; Linux x86_64"}
+	androidVersions = []string{"Android 9; Pixel 3", "Android 10; Pixel 4 XL", "Android 11; Pixel 5"}
+	iphoneVersions  = []string{"iPhone; CPU iPhone OS 14_4 like Mac OS X", "iPhone; CPU iPhone OS 15_1 like Mac OS X"}
 
 	// Expanded browser choices
 	browsers = []string{"chrome", "firefox", "edge", "safari", "opera", "brave"}
@@ -99,11 +100,17 @@ func getUserAgent() string {
 }
 
 func getHeader() string {
+	// Use customHost if provided, otherwise fall back to ip
+	hostHeader := ip
+	if customHost != "" {
+		hostHeader = customHost
+	}
+
 	header := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
-	header += fmt.Sprintf("Host: %s\r\n", ip)
+	header += fmt.Sprintf("Host: %s\r\n", hostHeader)
 	header += fmt.Sprintf("User-Agent: %s\r\n", getUserAgent())
 	header += fmt.Sprintf("Accept: %s\r\n", acceptHeaders[rand.Intn(len(acceptHeaders))])
-	header += "Accept-Encoding: gzip, deflate\r\n" // Can also randomize this for better variety
+	header += "Accept-Encoding: gzip, deflate\r\n"
 	header += fmt.Sprintf("Accept-Language: %s\r\n", acceptLanguages[rand.Intn(len(acceptLanguages))])
 	if cookie != "" {
 		header += fmt.Sprintf("Cookie: %s\r\n", cookie)
@@ -115,44 +122,47 @@ func getHeader() string {
 func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
 	defer wg.Done()
 
-	tlsConfig := &tls.Config{InsecureSkipVerify: true}
+	tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: ip}
 	address := fmt.Sprintf("%s:%d", ip, port)
 
 	for count := range requestCount {
-		var conn net.Conn
-		var err error
+		for {
+			var conn net.Conn
+			var err error
 
-		if port == 443 {
-			conn, err = tls.Dial("tcp", address, tlsConfig)
-		} else {
-			conn, err = net.Dial("tcp", address)
-		}
-
-		if err != nil {
-			fmt.Printf("Worker %d: connection error: %v\n", id, err)
-			continue
-		}
-
-		header := getHeader()
-		for i := 0; i < count; i++ {
-			time.Sleep(time.Millisecond * time.Duration(rand.Intn(80)))
-			_, err := conn.Write([]byte(header))
-			if err != nil {
-				fmt.Printf("Worker %d: write error: %v\n", id, err)
-				break
+			if port == 443 {
+				conn, err = tls.Dial("tcp", address, tlsConfig)
+			} else {
+				conn, err = net.Dial("tcp", address)
 			}
+
+			if err != nil {
+				fmt.Printf("Worker %d: connection error: %v\n", id, err)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			header := getHeader()
+			for i := 0; i < count; i++ {
+				time.Sleep(time.Millisecond * time.Duration(rand.Intn(80)))
+				_, err := conn.Write([]byte(header))
+				if err != nil {
+					fmt.Printf("Worker %d: write error: %v\n", id, err)
+					break
+				}
+			}
+			conn.Close()
+			break
 		}
-		conn.Close()
 	}
 }
 
 func main() {
 	if len(os.Args) < 4 {
-		fmt.Println("Usage: <URL> <THREADS> <TIMER>")
+		fmt.Println("Usage: <URL> <THREADS> <TIMER> [CUSTOM_HOST]")
 		return
 	}
 
-	// Parse URL and determine port and path
 	parsedURL, err := url.Parse(os.Args[1])
 	if err != nil {
 		fmt.Println("Invalid URL:", err)
@@ -176,7 +186,15 @@ func main() {
 	threads, _ = strconv.Atoi(os.Args[2])
 	timer, _ = strconv.Atoi(os.Args[3])
 
+	// Optional custom host
+	if len(os.Args) > 4 {
+		customHost = os.Args[4]
+	}
+
 	fmt.Printf("Starting stress test on %s:%d%s with %d threads for %d seconds\n", ip, port, path, threads, timer)
+	if customHost != "" {
+		fmt.Printf("Using custom Host header: %s\n", customHost)
+	}
 
 	var wg sync.WaitGroup
 	requestCount := make(chan int, threads)
@@ -186,7 +204,6 @@ func main() {
 		go worker(i, &wg, requestCount)
 	}
 
-	// Dispatch requests to workers
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
