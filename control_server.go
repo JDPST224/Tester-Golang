@@ -102,114 +102,27 @@ func serveAgentStatuses(w http.ResponseWriter, r *http.Request) {
 }
 
 func renderInterface(w http.ResponseWriter, r *http.Request) {
-	tmpl := `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control Server</title>
-    <style>
-        body, html {
-            font-family: 'Arial', sans-serif;
-            background-color: #1a1a1a;
-            color: #f4f4f9;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            margin: 0;
-        }
-        .main-container {
-            width: 90%;
-            max-width: 800px;
-            margin-top: 20px;
-        }
-        .container {
-            background-color: #262626;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
-        }
-        input, button {
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #555;
-            border-radius: 5px;
-            width: 90%;
-            color: #f4f4f9;
-            background-color: #1a1a1a;
-        }
-        button {
-            background-color: #007bff;
-            color: #fff;
-            cursor: pointer;
-        }
-        table {
-            width: 100%;
-            margin-top: 10px;
-        }
-        th, td {
-            padding: 8px;
-            text-align: left;
-            border: 1px solid #555;
-        }
-    </style>
-    <script>
-        async function fetchAgentStatuses() {
-            const response = await fetch('/agent-statuses');
-            const data = await response.json();
-            const tbody = document.querySelector('tbody');
-            tbody.innerHTML = '';
-            for (const [agent, info] of Object.entries(data)) {
-                const row = '<tr>' +
-                            '<td>' + agent + '</td>' +
-                            '<td>' + (info.Online ? 'Online' : 'Offline') + '</td>' +
-                            '<td>' + info.Status + '</td>' +
-                            '<td>' + new Date(info.LastPing).toLocaleString() + '</td>' +
-                            '</tr>';
-                tbody.innerHTML += row;
-            }
-        }
-        setInterval(fetchAgentStatuses, 5000);
-        fetchAgentStatuses();
-    </script>
-</head>
-<body>
-    <div class="main-container">
-        <div class="container">
-            <h1>Control Server</h1>
-            <form method="POST" action="/command">
-                <input type="text" name="url" placeholder="Target URL" required>
-                <input type="number" name="threads" placeholder="Threads" required>
-                <input type="number" name="timer" placeholder="Timer (seconds)" required>
-                <input type="text" name="custom_host" placeholder="Custom Host (optional)">
-                <button type="submit">Start</button>
-            </form>
-        </div>
-        <div class="container">
-            <h2>Agent Status</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Agent</th>
-                        <th>Online</th>
-                        <th>Status</th>
-                        <th>Last Ping</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-</body>
-</html>
-`
+	// Path to the HTML file
+	const filePath = "Interface/index.html"
+
+	// Parse the HTML file
+	tmpl, err := template.ParseFiles(filePath)
+	if err != nil {
+		http.Error(w, "Error loading template", http.StatusInternalServerError)
+		fmt.Printf("Template error: %v\n", err)
+		return
+	}
+
+	// Lock to prevent concurrent issues
 	mu.Lock()
 	defer mu.Unlock()
 
-	tmplParsed, _ := template.New("interface").Parse(tmpl)
-	tmplParsed.Execute(w, nil)
+	// Render the template
+	err = tmpl.Execute(w, nil)
+	if err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		fmt.Printf("Execution error: %v\n", err)
+	}
 }
 
 func handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -244,11 +157,22 @@ func handleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Serve static files from the "Interface" folder
+	fs := http.FileServer(http.Dir("Interface"))
+	http.Handle("/Interface/", http.StripPrefix("/Interface/", fs))
+
+	// Start monitoring agents
 	go monitorAgents()
+
+	// Define route handlers
 	http.HandleFunc("/", renderInterface)
 	http.HandleFunc("/command", handleCommand)
 	http.HandleFunc("/agent-statuses", serveAgentStatuses)
 
+	// Start the server
 	fmt.Println("Server running on http://localhost:8080")
-	http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Println("Error starting server:", err)
+	}
 }
