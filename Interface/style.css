@@ -6,6 +6,11 @@ body, html {
     justify-content: center;
     align-items: center;
 }
+
+body::-webkit-scrollbar {
+    display: none;
+}
+
 .main-container {
     width: 100%;
     max-width: 1150px;
@@ -83,6 +88,10 @@ button:active {
 .scroller {
     max-height: 180px;
     overflow: auto;
+}
+
+.scroller::-webkit-scrollbar {
+    display: none;
 }
   
 table {
