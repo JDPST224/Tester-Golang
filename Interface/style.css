@@ -58,7 +58,7 @@ article input{
     background-color: #1a1a1a;
 }
 
-button {
+.Start_button {
     margin: 10px;
     width: 80%;
     padding: 12.5px 30px;
@@ -71,19 +71,60 @@ button {
     -webkit-transition: all 0.5s;
 }
 
-button:hover {
+.Start_button:hover {
     background-color: #6fc5ff;
     box-shadow: 0 0 20px #6fc5ff50;
     transform: scale(1.1);
 }
 
-button:active {
+.Start_button:active {
     background-color: #3d94cf;
     transition: all 0.25s;
     -webkit-transition: all 0.25s;
     box-shadow: none;
     transform: scale(0.98);
 }
+
+.topc{
+    display: flex;
+    text-align: center;
+    justify-content: space-between;
+}
+
+.topc form{
+    font-size: 13px;
+    width: 470px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.topc input{
+    max-width: 280px;
+    padding: 10px;
+    margin: 5px;
+    border: 1px solid #555;
+    border-radius: 5px;
+    width: 100%;
+    color: #f4f4f9;
+    background-color: #1a1a1a;
+}
+
+.add_button {
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 8px 13px;
+    border-radius: 0.5rem;
+    transition: background 0.3s ease-in-out;
+}
+
+.add_button:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
 
 .scroller {
     max-height: 180px;
