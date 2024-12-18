@@ -15,7 +15,7 @@
                     <input type="text" name="url" placeholder="Target URL" required>
                     <input type="number" name="threads" placeholder="Threads" required>
                     <input type="number" name="timer" placeholder="Timer (seconds)" required>
-                    <button type="submit">Start</button>
+                    <button class="Start_button" type="submit">Start</button>
                 </article>
                 <article>
                     <h2>Custom Header</h2>
@@ -24,7 +24,14 @@
             </form>
         </div>
         <div class="container">
-            <h2>Agent Status</h2>
+            <div class="topc">
+                <h2>-- Agent Status --</h2>
+                <form method="POST" action="/">
+                    <span>ADD AGENT :</span>
+                    <input type="text" name="url" placeholder="Agent URL" required>
+                    <button class="add_button">Add</button>
+                </form>
+            </div>
             <div class="scroller">
                 <table>
                     <thead>
