@@ -93,6 +93,37 @@ func monitorAgents() {
 	}
 }
 
+func addAgentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Retrieve the agent URL from form input
+	newAgent := r.FormValue("url")
+	if newAgent == "" {
+		http.Error(w, "Agent URL is required", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Append the new agent URL to the list if it does not already exist
+	for _, agent := range agents {
+		if agent == newAgent {
+			http.Error(w, "Agent already exists", http.StatusConflict)
+			return
+		}
+	}
+
+	agents = append(agents, newAgent)
+	fmt.Printf("Added new agent: %s\n", newAgent)
+
+	// Redirect back to the main page
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 func serveAgentStatuses(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -166,6 +197,7 @@ func main() {
 
 	// Define route handlers
 	http.HandleFunc("/", renderInterface)
+	http.HandleFunc("/add-agent", addAgentHandler)
 	http.HandleFunc("/command", handleCommand)
 	http.HandleFunc("/agent-statuses", serveAgentStatuses)
 
