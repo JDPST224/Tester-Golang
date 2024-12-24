@@ -114,7 +114,7 @@ func getHeader(method string) string {
 func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
 	defer wg.Done()
 
-	tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: customHost}
+	tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: ip}
 	for count := range requestCount {
 		for {
 			randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
