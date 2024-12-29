@@ -10,5 +10,6 @@ go run control_server.go
 ```
 ## Proxy Generate Certs
 ```bash
-openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes
+openssl genrsa -out proxy.key 2048
+openssl req -new -x509 -key proxy.key -out proxy.crt -days 365
 ```
