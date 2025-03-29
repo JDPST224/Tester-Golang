@@ -8,8 +8,3 @@ go run agent.go
 ```bash
 go run control_server.go
 ```
-## Proxy Generate Certs
-```bash
-openssl genrsa -out proxy.key 2048
-openssl req -new -x509 -key proxy.key -out proxy.crt -days 365
-```
