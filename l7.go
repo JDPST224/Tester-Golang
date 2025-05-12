@@ -108,7 +108,6 @@ func getHeader(method string) string {
 		"fr-FR,fr;q=0.9",
 	}
 
-	cookie := fmt.Sprintf("sessionid=%x", rand.Uint64())
 	header := fmt.Sprintf("%s %s HTTP/1.1\r\n", method, path)
 	header += fmt.Sprintf("Host: %s\r\n", hostHeader)
 	header += fmt.Sprintf("User-Agent: %s\r\n", getUserAgent())
@@ -119,7 +118,7 @@ func getHeader(method string) string {
 	header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
 	header += fmt.Sprintf("DNT: %d\r\n", rand.Intn(2))
 	header += "Upgrade-Insecure-Requests: 1\r\n"
-	header += fmt.Sprintf("Cookie: %s\r\n", cookie)
+	header += fmt.Sprintf("Cookie: %x\r\n", rand.Uint64())
 
 	if method == "POST" {
 		header += "Content-Length: 0\r\n"
