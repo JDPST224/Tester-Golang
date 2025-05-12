@@ -95,18 +95,36 @@ func getHeader(method string) string {
 		hostHeader = customHost
 	}
 
+	referers := []string{
+		"https://www.google.com",
+		"https://www.bing.com",
+		"https://twitter.com",
+		fmt.Sprintf("https://%s", hostHeader),
+	}
+
+	languages := []string{
+		"en-US,en;q=0.9",
+		"en-GB,en;q=0.8",
+		"fr-FR,fr;q=0.9",
+	}
+
+	cookie := fmt.Sprintf("sessionid=%x", rand.Uint64())
 	header := fmt.Sprintf("%s %s HTTP/1.1\r\n", method, path)
 	header += fmt.Sprintf("Host: %s\r\n", hostHeader)
 	header += fmt.Sprintf("User-Agent: %s\r\n", getUserAgent())
 	header += "Accept: */*\r\n"
 	header += "Accept-Encoding: gzip, deflate\r\n"
 	header += "Connection: keep-alive\r\n"
+	header += fmt.Sprintf("Referer: %s\r\n", referers[rand.Intn(len(referers))])
+	header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
+	header += fmt.Sprintf("DNT: %d\r\n", rand.Intn(2))
+	header += "Upgrade-Insecure-Requests: 1\r\n"
+	header += fmt.Sprintf("Cookie: %s\r\n", cookie)
+
 	if method == "POST" {
 		header += "Content-Length: 0\r\n"
 	}
-	if cookie != "" {
-		header += fmt.Sprintf("Cookie: %s\r\n", cookie)
-	}
+
 	header += "\r\n"
 	return header
 }
