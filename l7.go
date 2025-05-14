@@ -119,7 +119,7 @@ func getHeader(method string) string {
 	header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
 	header += fmt.Sprintf("DNT: %d\r\n", rand.Intn(2))
 	header += "Upgrade-Insecure-Requests: 1\r\n"
-	//header += fmt.Sprintf("Cookie: %x\r\n", rand.Uint64())
+	header += fmt.Sprintf("Cookie: %x\r\n", rand.Uint64())
 
 	if method == "POST" {
 		header += "Content-Length: 0\r\n"
