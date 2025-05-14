@@ -95,12 +95,12 @@ func getHeader(method string) string {
 		hostHeader = customHost
 	}
 
-	referers := []string{
+	/*referers := []string{
 		"https://www.google.com",
 		"https://www.bing.com",
 		"https://twitter.com",
 		fmt.Sprintf("https://%s", hostHeader),
-	}
+	}*/
 
 	languages := []string{
 		"en-US,en;q=0.9",
