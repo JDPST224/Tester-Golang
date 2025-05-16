@@ -112,7 +112,7 @@ func floodWorker(id int, stop <-chan struct{}) {
 				continue
 			}
 
-			for i := 0; i < rand.Intn(100)+100; i++ { // 50-100 requests/connection
+			for i := 0; i < rand.Intn(100)+100; i++ { // 100-200 requests/connection
 				method := httpMethods[rand.Intn(len(httpMethods))]
 				reqPath := path
 				if rand.Intn(2) == 0 {
