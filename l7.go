@@ -21,7 +21,7 @@ var (
 	timer         int
 	cookie        string
 	customHost    string
-	httpMethods   = []string{"GET", "POST", "HEAD"} // Random HTTP methods
+	httpMethods   = []string{"GET", "HEAD"} // Random HTTP methods
 	basePath      string
 	platformChoices = []string{"Macintosh", "Windows", "X11", "Linux", "iPhone", "Android"}
 
@@ -119,12 +119,7 @@ func getHeader(method string) string {
 	header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
 	header += fmt.Sprintf("DNT: %d\r\n", rand.Intn(2))
 	header += "Upgrade-Insecure-Requests: 1\r\n"
-	header += fmt.Sprintf("Cookie: %x\r\n", rand.Uint64())
-
-	if method == "POST" {
-		header += "Content-Length: 0\r\n"
-	}
-
+	//header += fmt.Sprintf("Cookie: %x\r\n", rand.Uint64())
 	header += "\r\n"
 	return header
 }
@@ -152,10 +147,9 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
 				continue
 			}
 
-			method := httpMethods[rand.Intn(len(httpMethods))] // Random HTTP method
-			header := getHeader(method)
-
 			for i := 0; i < count; i++ {
+				method := httpMethods[rand.Intn(len(httpMethods))] // Random HTTP method
+				header := getHeader(method)
 				time.Sleep(time.Millisecond * time.Duration(rand.Intn(80)))
 				_, err := conn.Write([]byte(header))
 				if err != nil {
