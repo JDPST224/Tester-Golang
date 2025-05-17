@@ -21,7 +21,7 @@ var (
 	timer         int
 	customHost    string
 	httpMethods   = []string{"GET", "HEAD", "POST"}
-	slowlorisRate = 0.3 // float64 type
+	slowlorisRate = 0.4 // float64 type
 )
 
 func init() {
