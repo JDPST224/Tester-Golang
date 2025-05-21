@@ -24,10 +24,6 @@ var (
     httpMethods   = []string{"GET", "POST"} // Random HTTP methods
 )
 
-func init() {
-    rand.Seed(time.Now().UnixNano())
-}
-
 func randomString(length int) string {
     const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     result := make([]byte, length)
@@ -186,10 +182,10 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     defer wg.Done()
 
     tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: ip}
-    method := httpMethods[rand.Intn(len(httpMethods))]
-    randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
+    method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
     for count := range requestCount {
         for {
+            randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
             address := fmt.Sprintf("%s:%d", randomIP, port)
 
             var conn net.Conn
