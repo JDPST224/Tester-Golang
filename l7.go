@@ -21,7 +21,7 @@ var (
     threads       int
     timer         int
     customHost    string
-    httpMethods   = []string{"GET", "POST"} // Random HTTP methods
+    httpMethods   = []string{"GET", "POST", "HEAD"} // Random HTTP methods
 )
 
 func randomString(length int) string {
