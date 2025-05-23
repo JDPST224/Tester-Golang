@@ -149,7 +149,7 @@ func getHeader(method string) (string, []byte) {
     fmt.Fprintf(&headerBuilder, "X-Forwarded-For: %d.%d.%d.%d\r\n", ipBuilder[0], ipBuilder[1], ipBuilder[2], ipBuilder[3])
     
     headerBuilder.WriteString("Connection: keep-alive\r\nCache-Control: no-cache\r\n")
-    fmt.Fprintf(&headerBuilder, "Referer: https://%s\r\n", hostHeader)
+    fmt.Fprintf(&headerBuilder, "Referer: https://%s/\r\n", hostHeader)
 
     var body []byte
 
