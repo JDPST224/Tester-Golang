@@ -131,7 +131,7 @@ func getHeader(method string) (string, []byte) {
     header += fmt.Sprintf("Host: %s\r\n", hostHeader)
     header += fmt.Sprintf("User-Agent: %s\r\n", getUserAgent())
     header += "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"
-    header += "Accept-Encoding: gzip, deflate, br\r\n"
+    header += "Accept-Encoding: gzip, deflate, br, zstd\r\n"
     header += fmt.Sprintf("Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
     header += fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
     header += "Connection: keep-alive\r\n"
@@ -152,11 +152,8 @@ func getHeader(method string) (string, []byte) {
         switch contentType {
         case "application/x-www-form-urlencoded":
             data := url.Values{}
-            for i := 0; i < 3; i++ {
-                key := randomString(5)
-                value := randomString(10)
-                data.Set(key, value)
-            }
+            data.Set("username", randomString(8))   // Random username (8 chars)
+            data.Set("password", randomString(12))  // Random password (12 chars)
             body = []byte(data.Encode())
         case "application/json":
             var parts []string
