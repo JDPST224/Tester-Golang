@@ -27,10 +27,6 @@ type AgentStatus struct {
 
 var agents = []string{
 	"http://localhost:8081",
-	"https://humble-muskrat-reliably.ngrok-free.app",
-	"https://tidy-notably-vervet.ngrok-free.app",
-	"https://moved-miserably-oryx.ngrok-free.app",
-	"https://related-mongrel-purely.ngrok-free.app",
 }
 
 var mu sync.Mutex
