@@ -161,12 +161,13 @@ func getHeader(method string) (string, []byte) {
         // Body construction
         switch contentType {
         case "application/x-www-form-urlencoded":
-            data := url.Values{
-                "username": {randomString(8)},
-                "password": {randomString(12)},
+            data := url.Values{}
+            for i := 0; i < 3; i++ {
+                key := randomString(5)
+                value := randomString(10)
+                data.Set(key, value)
             }
             body = []byte(data.Encode())
-
         case "application/json":
             var buf bytes.Buffer
             buf.WriteByte('{')
