@@ -195,7 +195,18 @@ func getHeader(method string) (string, []byte) {
 func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     defer wg.Done()
 
-    tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: ip}
+    hostHeader := ip
+    if customHost != "" {
+        hostHeader = customHost
+    }
+
+    tlsConfig := &tls.Config{
+        ServerName:         hostHeader,
+        InsecureSkipVerify: false, // Set to true only if necessary
+        MinVersion:         tls.VersionTLS10, // for old tls
+        MaxVersion:         tls.VersionTLS13,
+    }
+    
     method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
     for count := range requestCount {
         for {
