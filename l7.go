@@ -300,7 +300,7 @@ func main() {
         for t := 0; t < timer; t++ {
             <-ticker.C
             for i := 0; i < threads; i++ {
-                requestCount <- 500
+                requestCount <- 400
             }
         }
         close(requestCount)
