@@ -300,7 +300,7 @@ func main() {
         for t := 0; t < timer; t++ {
             <-ticker.C
             for i := 0; i < threads; i++ {
-                requestCount <- rand.Intn(100)+300 // 300-400 requests
+                requestCount <- 500
             }
         }
         close(requestCount)
