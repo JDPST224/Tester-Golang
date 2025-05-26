@@ -202,9 +202,7 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
 
     tlsConfig := &tls.Config{
         ServerName:         hostHeader,
-        InsecureSkipVerify: false, // Set to true only if necessary
-        MinVersion:         tls.VersionTLS10, // for old tls
-        MaxVersion:         tls.VersionTLS13,
+        InsecureSkipVerify: true, // Set to true only if necessary
     }
     
     method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
