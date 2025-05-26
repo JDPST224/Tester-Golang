@@ -208,6 +208,7 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
     for count := range requestCount {
         for {
+            header, body := getHeader(method)
             randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
             address := fmt.Sprintf("%s:%d", randomIP, port)
 
@@ -226,7 +227,6 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
             }
 
             for i := 0; i < count; i++ {
-                header, body := getHeader(method)
                 _, err := conn.Write([]byte(header))
                 if err != nil {
                     fmt.Printf("Worker %d: write error: %v\n", id, err)
