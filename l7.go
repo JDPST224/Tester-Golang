@@ -206,7 +206,6 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     tlsConfig := &tls.Config{
         ServerName:         hostHeader,
         InsecureSkipVerify: true, // Set to true only if necessary
-        NextProtos: []string{"h2", "http/1.1"}, // Prioritize HTTP/2
     }
     
     method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
