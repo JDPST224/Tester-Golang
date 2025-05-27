@@ -59,7 +59,7 @@ func resolveDNS(hostname string) ([]string, error) {
 }
 
 func reResolveLoop(hostname string) {
-    ticker := time.NewTicker(1 * time.Minute)
+    ticker := time.NewTicker(30 * time.Second)
     defer ticker.Stop()
     for {
         select {
@@ -255,7 +255,7 @@ func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
                     fmt.Printf("Worker %d: write error: %v\n", id, err)
                     break
                 }
-                time.Sleep(time.Duration(rand.Intn(251)+50) * time.Millisecond)
+                time.Sleep(time.Duration(rand.Intn(200)+50) * time.Millisecond)
             }
         }
         conn.Close()
@@ -315,7 +315,7 @@ func main() {
         for t := 0; t < timer; t++ {
             <-ticker.C
             for i := 0; i < threads; i++ {
-                requestCount <- 800
+                requestCount <- 1000
             }
         }
         close(requestCount)
