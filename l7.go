@@ -29,6 +29,7 @@ var (
         "application/json",
         "text/plain",
     }
+    ipsMutex      sync.Mutex // Mutex to protect ips slice
 )
 
 func randomString(length int) string {
@@ -40,25 +41,40 @@ func randomString(length int) string {
     return string(result)
 }
 
-func resolveDNS(hostname string) {
+func resolveDNS(hostname string) ([]string, error) {
     addrs, err := net.LookupIP(hostname)
     if err != nil {
-        fmt.Println("Failed to resolve DNS:", err)
-        os.Exit(1)
+        return nil, err
     }
-
+    var newIPs []string
     for _, addr := range addrs {
         if ipv4 := addr.To4(); ipv4 != nil {
-            ips = append(ips, ipv4.String())
+            newIPs = append(newIPs, ipv4.String())
         }
     }
-
-    if len(ips) == 0 {
-        fmt.Println("No valid IP addresses resolved!")
-        os.Exit(1)
+    if len(newIPs) == 0 {
+        return nil, fmt.Errorf("no valid IPv4 addresses found")
     }
+    return newIPs, nil
+}
 
-    fmt.Printf("Resolved IPs: %v\n", ips)
+func reResolveLoop(hostname string) {
+    ticker := time.NewTicker(1 * time.Minute)
+    defer ticker.Stop()
+    for {
+        select {
+        case <-ticker.C:
+            newIPs, err := resolveDNS(hostname)
+            if err != nil {
+                fmt.Printf("Re-resolve failed: %v - keeping existing IPs\n", err)
+                continue
+            }
+            ipsMutex.Lock()
+            ips = newIPs
+            ipsMutex.Unlock()
+            fmt.Printf("Re-resolved IPs: %v\n", newIPs)
+        }
+    }
 }
 
 func getUserAgent() string {
@@ -197,56 +213,52 @@ func getHeader(method string) (string, []byte) {
 
 func worker(id int, wg *sync.WaitGroup, requestCount chan int) {
     defer wg.Done()
-
     hostHeader := ip
     if customHost != "" {
         hostHeader = customHost
     }
-
     tlsConfig := &tls.Config{
         ServerName:         hostHeader,
-        InsecureSkipVerify: true, // Set to true only if necessary
+        InsecureSkipVerify: true,
     }
-    
-    method := httpMethods[rand.Intn(len(httpMethods))] // Pick a random method per worker
+    method := httpMethods[rand.Intn(len(httpMethods))]
     for count := range requestCount {
-        for {
-            randomIP := ips[rand.Intn(len(ips))] // Pick a random resolved IP
-            address := fmt.Sprintf("%s:%d", randomIP, port)
-
-            var conn net.Conn
-            var err error
-            if port == 443 {
-                conn, err = tls.Dial("tcp", address, tlsConfig)
-            } else {
-                conn, err = net.Dial("tcp", address)
-            }
-
+        ipsMutex.Lock()
+        currentIPs := make([]string, len(ips))
+        copy(currentIPs, ips)
+        ipsMutex.Unlock()
+        
+        randomIP := currentIPs[rand.Intn(len(currentIPs))]
+        address := fmt.Sprintf("%s:%d", randomIP, port)
+        var conn net.Conn
+        var err error
+        if port == 443 {
+            conn, err = tls.Dial("tcp", address, tlsConfig)
+        } else {
+            conn, err = net.Dial("tcp", address)
+        }
+        if err != nil {
+            fmt.Printf("Worker %d: connection error: %v\n", id, err)
+            time.Sleep(time.Second)
+            continue
+        }
+        for i := 0; i < count; i++ {
+            header, body := getHeader(method)
+            _, err := conn.Write([]byte(header))
             if err != nil {
-                fmt.Printf("Worker %d: connection error: %v\n", id, err)
-                time.Sleep(time.Second)
-                continue
+                fmt.Printf("Worker %d: write error: %v\n", id, err)
+                break
             }
-
-            for i := 0; i < count; i++ {
-                header, body := getHeader(method)
-                _, err := conn.Write([]byte(header))
+            if method == "POST" {
+                _, err = conn.Write(body)
                 if err != nil {
                     fmt.Printf("Worker %d: write error: %v\n", id, err)
                     break
                 }
-                if method == "POST" {
-                    _, err = conn.Write(body)
-                    if err != nil {
-                        fmt.Printf("Worker %d: write error: %v\n", id, err)
-                        break
-                    }
-                time.Sleep(time.Duration(rand.Intn(251)+50) * time.Millisecond)// Random delay between 50ms to 250ms
-                }
+                time.Sleep(time.Duration(rand.Intn(251)+50) * time.Millisecond)
             }
-            conn.Close()
-            break
         }
+        conn.Close()
     }
 }
 
@@ -255,13 +267,11 @@ func main() {
         fmt.Println("Usage: <URL> <THREADS> <TIMER> [CUSTOM_HOST]")
         return
     }
-
     parsedURL, err := url.Parse(os.Args[1])
     if err != nil {
         fmt.Println("Invalid URL:", err)
         return
     }
-
     ip = parsedURL.Hostname()
     if parsedURL.Port() != "" {
         port, _ = strconv.Atoi(parsedURL.Port())
@@ -270,37 +280,38 @@ func main() {
     } else {
         port = 80
     }
-
     path = parsedURL.Path
     if path == "" {
         path = "/"
     }
-
     threads, _ = strconv.Atoi(os.Args[2])
     timer, _ = strconv.Atoi(os.Args[3])
     if len(os.Args) > 4 {
         customHost = os.Args[4]
     }
-
-    resolveDNS(ip)
-
+    initialIPs, err := resolveDNS(ip)
+    if err != nil {
+        fmt.Printf("Initial DNS resolution failed: %v\n", err)
+        os.Exit(1)
+    }
+    ips = initialIPs
+    fmt.Printf("Initial resolved IPs: %v\n", ips)
+    
+    go reResolveLoop(ip)
+    
     fmt.Printf("Starting stress test on %s:%d%s with %d threads for %d seconds\n", ip, port, path, threads, timer)
     if customHost != "" {
         fmt.Printf("Using custom Host header: %s\n", customHost)
     }
-
     var wg sync.WaitGroup
     requestCount := make(chan int, threads)
-
     for i := 0; i < threads; i++ {
         wg.Add(1)
         go worker(i, &wg, requestCount)
     }
-
     go func() {
         ticker := time.NewTicker(1 * time.Second)
         defer ticker.Stop()
-
         for t := 0; t < timer; t++ {
             <-ticker.C
             for i := 0; i < threads; i++ {
@@ -309,7 +320,6 @@ func main() {
         }
         close(requestCount)
     }()
-
     wg.Wait()
     fmt.Println("Stress test completed.")
 }
