@@ -19,7 +19,7 @@ var (
     ips      []string
     ipsMutex sync.Mutex
 
-    httpMethods  = []string{"GET", "POST", "HEAD"}
+    httpMethods  = []string{"GET", "GET", "GET", "POST", "HEAD"}
     languages    = []string{"en-US,en;q=0.9", "en-GB,en;q=0.8", "fr-FR,fr;q=0.9"}
     contentTypes = []string{"application/x-www-form-urlencoded", "application/json", "text/plain"}
 )
@@ -239,6 +239,7 @@ func buildRequest(cfg StressConfig, method string) (string, []byte) {
     }
 
     // Final connection header
+    fmt.Fprintf(&buf, "Referer: https://%s/\r\n", hostHdr)
     buf.WriteString("Connection: keep-alive\r\n\r\n")
 
     return buf.String(), body
@@ -246,17 +247,16 @@ func buildRequest(cfg StressConfig, method string) (string, []byte) {
 
 // writeCommonHeaders adds headers with randomness
 func writeCommonHeaders(buf *bytes.Buffer) {
-    // User-Agent
     fmt.Fprintf(buf, "User-Agent: %s\r\n", randomUserAgent())
-    // Accept
-    buf.WriteString("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n")
-    // Accept-Language
+    buf.WriteString("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n")
+    buf.WriteString("Accept-Encoding: gzip, deflate, br, zstd\r\n")
     fmt.Fprintf(buf, "Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
-    // X-Forwarded-For
-    fmt.Fprintf(buf, "X-Forwarded-For: %d.%d.%d.%d\r\n",
-        rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
-    // Upgrade header
-    buf.WriteString("Upgrade-Insecure-Requests: 1\r\n")
+    fmt.Fprintf(buf, "X-Forwarded-For: %d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
+    buf.WriteString("Sec-Fetch-Site: none\r\n")
+    buf.WriteString("Sec-Fetch-Mode: navigate\r\n")
+    buf.WriteString("Sec-Fetch-User: ?1\r\n")
+    buf.WriteString("Sec-Fetch-Dest: document\r\n")
+    buf.WriteString("Upgrade-Insecure-Requests: 1\r\nCache-Control: no-cache\r\n")
 }
 
 // createBody builds a random POST payload based on content-type
