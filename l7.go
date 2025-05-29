@@ -157,7 +157,7 @@ func runWorkers(cfg StressConfig) {
         wg.Add(1)
         go func(id int) {
             defer wg.Done()
-            ticker := time.NewTicker(50 * time.Millisecond)
+            ticker := time.NewTicker(60 * time.Millisecond)
             defer ticker.Stop()
 
             tlsCfg := &tls.Config{
@@ -239,24 +239,33 @@ func buildRequest(cfg StressConfig, method string) (string, []byte) {
     }
 
     // Final connection header
-    fmt.Fprintf(&buf, "Referer: https://%s/\r\n", hostHdr)
-    buf.WriteString("Connection: keep-alive\r\n\r\n")
+    buf.WriteString("Referer: https://")
+    buf.WriteString(hostHdr)
+    buf.WriteString("/\r\nConnection: keep-alive\r\n\r\n")
 
     return buf.String(), body
 }
 
 // writeCommonHeaders adds headers with randomness
 func writeCommonHeaders(buf *bytes.Buffer) {
-    fmt.Fprintf(buf, "User-Agent: %s\r\n", randomUserAgent())
-    buf.WriteString("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n")
-    buf.WriteString("Accept-Encoding: gzip, deflate, br, zstd\r\n")
-    fmt.Fprintf(buf, "Accept-Language: %s\r\n", languages[rand.Intn(len(languages))])
-    fmt.Fprintf(buf, "X-Forwarded-For: %d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
-    buf.WriteString("Sec-Fetch-Site: none\r\n")
-    buf.WriteString("Sec-Fetch-Mode: navigate\r\n")
-    buf.WriteString("Sec-Fetch-User: ?1\r\n")
-    buf.WriteString("Sec-Fetch-Dest: document\r\n")
-    buf.WriteString("Upgrade-Insecure-Requests: 1\r\nCache-Control: no-cache\r\n")
+    buf.WriteString("User-Agent: ")
+    buf.WriteString(randomUserAgent())
+    buf.WriteString("\r\nAccept-Language: ")
+    buf.WriteString(languages[rand.Intn(len(languages))])
+    
+    // Static headers written in a single call
+    buf.WriteString("\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n" +
+        "Accept-Encoding: gzip, deflate, br, zstd\r\n" +
+        "Sec-Fetch-Site: none\r\n" +
+        "Sec-Fetch-Mode: navigate\r\n" +
+        "Sec-Fetch-User: ?1\r\n" +
+        "Sec-Fetch-Dest: document\r\n" +
+        "Upgrade-Insecure-Requests: 1\r\n" +
+        "Cache-Control: no-cache\r\nX-Forwarded-For: ")
+
+    // Generate the IP in one efficient call
+    fmt.Fprintf(buf, "%d.%d.%d.%d\r\n",
+        rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
 }
 
 // createBody builds a random POST payload based on content-type
