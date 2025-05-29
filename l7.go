@@ -224,7 +224,7 @@ func buildRequest(cfg StressConfig, method string) (string, []byte) {
     }
 
     // Request line + Host
-    fmt.Fprintf(&buf, "%s %s HTTP/1.1\r\nHost: %s\r\n", method, cfg.Path, hostHdr)
+    fmt.Fprintf(&buf, "%s %s HTTP/1.1\r\nHost: %s:%d\r\n", method, cfg.Path, hostHdr, cfg.Port)
 
     // Common randomized headers
     writeCommonHeaders(&buf)
