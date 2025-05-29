@@ -191,9 +191,9 @@ func sendBurst(cfg StressConfig, tlsCfg *tls.Config) {
     defer conn.Close()
 
     method := httpMethods[rand.Intn(len(httpMethods))]
-    header, body := buildRequest(cfg, method)
 
-    for i := 0; i < 500; i++ {
+    for i := 0; i < 250; i++ {
+        header, body := buildRequest(cfg, method)
         if _, err := conn.Write([]byte(header)); err != nil {
             fmt.Printf("[write header] %v\n", err)
             return
