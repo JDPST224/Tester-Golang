@@ -194,15 +194,18 @@ func sendBurst(cfg StressConfig, tlsCfg *tls.Config) {
 
     for i := 0; i < 250; i++ {
         header, body := buildRequest(cfg, method)
-        if _, err := conn.Write([]byte(header)); err != nil {
-            fmt.Printf("[write header] %v\n", err)
-            return
-        }
+
+        // batch header+body into one writev call:
+        var bufs net.Buffers
+        bufs = append(bufs, []byte(header))
         if method == "POST" {
-            if _, err := conn.Write(body); err != nil {
-                fmt.Printf("[write body] %v\n", err)
-                return
-            }
+            bufs = append(bufs, body)
+        }
+
+        // write both buffers in one syscall
+        if _, err := bufs.WriteTo(conn); err != nil {
+            fmt.Printf("[batched write] %v\n", err)
+            return
         }
     }
 }
