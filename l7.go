@@ -180,11 +180,6 @@ func runWorkers(cfg StressConfig) {
 
 // sendBurst opens a connection and sends ~500 requests back-to-back
 func sendBurst(cfg StressConfig, tlsCfg *tls.Config) {
-    var buf bytes.Buffer
-    hostHdr := cfg.Target.Hostname()
-    if cfg.CustomHost != "" {
-        hostHdr = cfg.CustomHost
-    }
     ipAddr := pickRandomIP()
     address := fmt.Sprintf("%s:%d", ipAddr, cfg.Port)
 
@@ -196,17 +191,10 @@ func sendBurst(cfg StressConfig, tlsCfg *tls.Config) {
     defer conn.Close()
 
     method := httpMethods[rand.Intn(len(httpMethods))]
-    header, body := buildRequest(cfg, method)
 
     for i := 0; i < 250; i++ {
-        // build the request line + Host header as a string
-        headerHost := fmt.Sprintf(
-            "%s %s?=%s HTTP/1.1\r\nHost: %s:%d\r\n",
-            method, cfg.Path, randomString(3), hostHdr, cfg.Port,
-        )
-        // write it into your buffer
-        buf.WriteString(headerHost)
-        if _, err := conn.Write([]byte(headerHost + header)); err != nil {
+        header, body := buildRequest(cfg, method)
+        if _, err := conn.Write([]byte(header)); err != nil {
             fmt.Printf("[write header] %v\n", err)
             return
         }
@@ -234,6 +222,9 @@ func buildRequest(cfg StressConfig, method string) (string, []byte) {
     if cfg.CustomHost != "" {
         hostHdr = cfg.CustomHost
     }
+
+    // Request line + Host
+    fmt.Fprintf(&buf, "%s %s HTTP/1.1\r\nHost: %s:%d\r\n", method, cfg.Path, hostHdr, cfg.Port)
 
     // Common randomized headers
     writeCommonHeaders(&buf)
