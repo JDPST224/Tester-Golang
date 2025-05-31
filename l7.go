@@ -1,4 +1,3 @@
-// Optimized HTTP Stress Testing Tool with Improved User-Agent and Request Handling
 package main
 
 import (
@@ -127,7 +126,7 @@ func runManager(ctx context.Context, cfg StressConfig) {
 }
 
 func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
-    ticker := time.NewTicker(60 * time.Millisecond)
+    ticker := time.NewTicker(time.Duration(rand.Intn(35)+35) * time.Millisecond)
     defer ticker.Stop()
     tlsCfg := &tls.Config{ServerName: cfg.Target.Hostname(), InsecureSkipVerify: true}
     for {
@@ -253,7 +252,7 @@ func sendBurst(cfg StressConfig, tlsCfg *tls.Config, ip string) {
     defer conn.Close()
 
     method := httpMethods[rand.Intn(len(httpMethods))]
-    for i := 0; i < 250; i++ {
+    for i := 0; i < 180; i++ {
         hdr, body := buildRequest(cfg, method)
         bufs := net.Buffers{hdr}
         if method == "POST" {
