@@ -211,7 +211,8 @@ func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-
+			// Choose a method at random.
+			method := httpMethods[rand.Intn(len(httpMethods))]
 			// Send bursts of requests on conn until an error occurs or ctx is done.
 			for {
 				select {
@@ -219,7 +220,7 @@ func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
 					conn.Close()
 					return
 				default:
-					sendBurst(conn, cfg, hostHdr)
+					sendBurst(conn, cfg, hostHdr, method)
 				}
 			}
 		}
@@ -399,10 +400,7 @@ func dialConn(ctx context.Context, addr string, tlsCfg *tls.Config) (net.Conn, e
 
 // sendBurst sends one HTTP request to the server on conn, then drains a small chunk of the response.
 // We send 1 request per call here; workerLoop calls this in a tight loop to generate load.
-func sendBurst(conn net.Conn, cfg StressConfig, hostHdr string) {
-	// Choose a method at random.
-	method := httpMethods[rand.Intn(len(httpMethods))]
-
+func sendBurst(conn net.Conn, cfg StressConfig, hostHdr string, method string) {
 	// Build headers + optional body.
 	hdr, body := buildRequest(cfg, method, hostHdr)
 	bufs := net.Buffers{hdr}
