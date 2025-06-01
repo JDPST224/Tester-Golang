@@ -437,12 +437,11 @@ func buildRequest(cfg StressConfig, method, hostHdr string) ([]byte, []byte) {
     buf.Reset()
     defer bufPool.Put(buf)
 
-    hostHdr := cfg.Target.Hostname()
 	if cfg.CustomHost != "" {
 		hostHdr = cfg.CustomHost
 	}
 
-    fmt.Fprintf(buf, "%s %s HTTP/1.1\r\nHost: %s\r\n", method, cfg.Path, hostPort)
+    fmt.Fprintf(buf, "%s %s HTTP/1.1\r\nHost: %s\r\n", method, cfg.Path, hostHdr)
 
     writeCommonHeaders(buf)
 
