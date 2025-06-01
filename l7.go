@@ -48,11 +48,20 @@ var (
 	// HTTP method distribution: GET is 3× more likely.
 	httpMethods = []string{"GET", "GET", "GET", "POST", "HEAD"}
 
-	// Accept-Language headers (randomized).
-	languages = []string{"en-US,en;q=0.9", "en-GB,en;q=0.8", "fr-FR,fr;q=0.9"}
+	// contentTypes is assumed to be defined somewhere in your codebase:
+	contentTypes = []string{
+		"application/x-www-form-urlencoded",
+		"application/json",
+		"text/plain",
+	}
 
-	// Content types for POST bodies.
-	contentTypes = []string{"application/x-www-form-urlencoded", "application/json", "text/plain"}
+	// languages is assumed to be defined somewhere in your codebase:
+	languages = []string{
+		"en-US,en;q=0.9",
+		"en-GB,en;q=0.8",
+		"fr-FR,fr;q=0.9,en-US;q=0.8",
+		"de-DE,de;q=0.9,en-US;q=0.8",
+	}
 )
 
 // StressConfig holds configuration for the stress test.
@@ -436,7 +445,7 @@ func buildRequest(cfg StressConfig, method, hostHdr string) ([]byte, []byte) {
 		hostPort = fmt.Sprintf("%s:%d", hostHdr, cfg.Port)
 	}
 
-	// Start-line + Host header.
+	// Start‐line + Host header.
 	fmt.Fprintf(buf, "%s %s HTTP/1.1\r\nHost: %s\r\n", method, cfg.Path, hostPort)
 
 	// Common headers.
@@ -451,7 +460,10 @@ func buildRequest(cfg StressConfig, method, hostHdr string) ([]byte, []byte) {
 	}
 
 	// Final headers.
-	fmt.Fprintf(buf, "Referer: https://%s/\r\nConnection: keep-alive\r\n\r\n", hostHdr)
+	// Include a Referer and Connection header at the end, as most browsers do.
+	fmt.Fprintf(buf, "Referer: https://%s/\r\n", hostHdr)
+	fmt.Fprintf(buf, "Origin: https://%s\r\n", hostHdr)
+	fmt.Fprintf(buf, "Connection: keep-alive\r\n\r\n")
 
 	// Copy to a fresh slice, because we'll return the buffer to the pool.
 	out := make([]byte, buf.Len())
@@ -460,36 +472,109 @@ func buildRequest(cfg StressConfig, method, hostHdr string) ([]byte, []byte) {
 }
 
 // writeCommonHeaders appends a set of randomized and static HTTP headers to the buffer.
+// Now mimics a modern Chrome/Firefox header set more closely.
 func writeCommonHeaders(buf *bytes.Buffer) {
-	buf.WriteString("User-Agent: " + randomUserAgent() + "\r\n")
-	buf.WriteString("Accept-Language: " + languages[rand.Intn(len(languages))] + "\r\n")
-	buf.WriteString("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n")
-	buf.WriteString("Accept-Encoding: gzip, deflate\r\n") // Simplified encoding
-	buf.WriteString("Sec-Fetch-Site: none\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-User: ?1\r\nSec-Fetch-Dest: document\r\n")
-	buf.WriteString("Upgrade-Insecure-Requests: 1\r\nCache-Control: no-cache\r\n")
-	fmt.Fprintf(buf, "X-Forwarded-For: %d.%d.%d.%d\r\n", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
+	// Randomized User-Agent (Chrome or Firefox variant)
+	ua := randomUserAgent()
+	buf.WriteString("User-Agent: " + ua + "\r\n")
+
+	// Accept header as a real browser would send
+	buf.WriteString("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8\r\n")
+
+	// Accept-Language with a few common choices
+	lang := languages[rand.Intn(len(languages))]
+	buf.WriteString("Accept-Language: " + lang + "\r\n")
+
+	// Accept-Encoding including br (brotli)
+	buf.WriteString("Accept-Encoding: gzip, deflate, br\r\n")
+
+	// DNT header (Do Not Track)
+	buf.WriteString("DNT: 1\r\n")
+
+	// Typical Chrome/Firefox sec-ch-ua headers
+	if isChromeUA(ua) {
+		// if UA is Chrome‐based
+		buf.WriteString(`sec-ch-ua: "Google Chrome";v="` + randomChromeVersion() + `", "Chromium";v="` + randomChromeVersion() + `", ";Not A Brand";v="99"` + "\r\n")
+		buf.WriteString("sec-ch-ua-mobile: ?0\r\n")
+		buf.WriteString(`sec-ch-ua-platform: "` + randomPlatform() + `"` + "\r\n")
+	} else {
+		// if UA is Firefox‐based
+		buf.WriteString(`sec-ch-ua: "Firefox";v="` + randomFirefoxVersion() + `", ";Not A Brand";v="99"` + "\r\n")
+		buf.WriteString("sec-ch-ua-mobile: ?0\r\n")
+		buf.WriteString(`sec-ch-ua-platform: "` + randomPlatform() + `"` + "\r\n")
+	}
+
+	// Sec-Fetch headers
+	buf.WriteString("Sec-Fetch-Site: none\r\n")
+	buf.WriteString("Sec-Fetch-Mode: navigate\r\n")
+	buf.WriteString("Sec-Fetch-User: ?1\r\n")
+	buf.WriteString("Sec-Fetch-Dest: document\r\n")
+
+	// Upgrade-Insecure-Requests
+	buf.WriteString("Upgrade-Insecure-Requests: 1\r\n")
+
+	// Cache-Control
+	buf.WriteString("Cache-Control: no-cache\r\n")
+
+	// X-Forwarded-For (random IP)
+	buf.WriteString(fmt.Sprintf("X-Forwarded-For: %d.%d.%d.%d\r\n",
+		rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256)))
 }
 
 // createBody generates a small random payload based on the content type.
+// Added a small chance of generating a “typical” JSON object (with keys like “username”, “password”).
 func createBody(ct string) []byte {
 	var b bytes.Buffer
 	switch ct {
 	case "application/x-www-form-urlencoded":
 		vals := url.Values{}
+		// Generate 3 random form fields with realistic-ish names 70% of the time,
+		// otherwise use randomString as before.
 		for i := 0; i < 3; i++ {
-			vals.Set(randomString(5), randomString(8))
+			var key, val string
+			if rand.Intn(100) < 70 {
+				// some plausible form-parameter names
+				typ := rand.Intn(3)
+				switch typ {
+				case 0:
+					key = "username"
+					val = randomString(8)
+				case 1:
+					key = "email"
+					val = fmt.Sprintf("%s@example.com", randomString(6))
+				default:
+					key = randomString(5)
+					val = randomString(8)
+				}
+			} else {
+				key = randomString(5)
+				val = randomString(8)
+			}
+			vals.Set(key, val)
 		}
 		b.WriteString(vals.Encode())
 
 	case "application/json":
-		b.WriteString("{")
-		for i := 0; i < 3; i++ {
-			if i > 0 {
-				b.WriteString(",")
+		// 50% chance of using a “plausible” small JSON with typical keys
+		if rand.Intn(100) < 50 {
+			b.WriteString(`{`)
+			entries := []string{
+				fmt.Sprintf(`"id":%d`, rand.Intn(10000)),
+				fmt.Sprintf(`"name":"%s"`, randomString(6)),
+				fmt.Sprintf(`"active":%t`, rand.Intn(2) == 1),
 			}
-			fmt.Fprintf(&b, "\"%s\":\"%s\"", randomString(5), randomString(8))
+			b.WriteString(entries[0] + "," + entries[1] + "," + entries[2])
+			b.WriteString(`}`)
+		} else {
+			b.WriteString("{")
+			for i := 0; i < 3; i++ {
+				if i > 0 {
+					b.WriteString(",")
+				}
+				fmt.Fprintf(&b, `"%s":"%s"`, randomString(5), randomString(8))
+			}
+			b.WriteString("}")
 		}
-		b.WriteString("}")
 
 	default: // "text/plain"
 		b.WriteString("text_" + randomString(12))
@@ -507,22 +592,52 @@ func randomString(n int) string {
 	return string(b)
 }
 
-// randomUserAgent builds a pseudo-random User-Agent string.
+// randomUserAgent builds a pseudo‐random User-Agent string (Chrome or Firefox).
 func randomUserAgent() string {
-	osList := []string{"Windows NT 10.0; Win64; x64", "Macintosh; Intel Mac OS X 10_15_7", "X11; Linux x86_64"}
+	osList := []string{
+		"Windows NT 10.0; Win64; x64",
+		"Macintosh; Intel Mac OS X 10_15_7",
+		"X11; Linux x86_64",
+	}
 	osPart := osList[rand.Intn(len(osList))]
 
-	switch rand.Intn(3) {
-	case 0:
-		v := fmt.Sprintf("%d.0.%d.0", rand.Intn(40)+80, rand.Intn(4000))
-		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", osPart, v)
-	case 1:
-		v := fmt.Sprintf("%d.0", rand.Intn(40)+70)
-		return fmt.Sprintf("Mozilla/5.0 (%s; rv:%s) Gecko/20100101 Firefox/%s", osPart, v, v)
-	default:
-		v := fmt.Sprintf("%d.0.%d", rand.Intn(16)+600, rand.Intn(100))
-		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/%s (KHTML, like Gecko) Version/13.1 Safari/%s", osPart, v, v)
+	if rand.Intn(2) == 0 {
+		// Chrome‐style UA
+		major := rand.Intn(30) + 90
+		build := rand.Intn(4000)
+		patch := rand.Intn(200)
+		version := fmt.Sprintf("%d.0.%d.%d", major, build, patch)
+		return fmt.Sprintf("Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", osPart, version)
+	} else {
+		// Firefox‐style UA
+		major := rand.Intn(30) + 70
+		minor := rand.Intn(10)
+		version := fmt.Sprintf("%d.0", major)
+		return fmt.Sprintf("Mozilla/5.0 (%s; rv:%s) Gecko/20100101 Firefox/%s.%d", osPart, version, version, minor)
 	}
+}
+
+// isChromeUA is a simple check to see if the UA string belongs to a Chrome‐style agent.
+func isChromeUA(ua string) bool {
+	return bytes.Contains([]byte(ua), []byte("Chrome/"))
+}
+
+// randomChromeVersion returns just the numeric portion for sec-ch-ua header.
+func randomChromeVersion() string {
+	major := rand.Intn(30) + 90
+	return fmt.Sprintf("%d", major)
+}
+
+// randomFirefoxVersion returns just the numeric portion for sec-ch-ua header.
+func randomFirefoxVersion() string {
+	major := rand.Intn(30) + 70
+	return fmt.Sprintf("%d", major)
+}
+
+// randomPlatform returns a plausible platform token for sec-ch-ua-platform.
+func randomPlatform() string {
+	platforms := []string{"Windows", "macOS", "Linux"}
+	return platforms[rand.Intn(len(platforms))]
 }
 
 // bufPool is a sync.Pool of bytes.Buffers to reduce allocations.
