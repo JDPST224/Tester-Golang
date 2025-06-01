@@ -217,7 +217,7 @@ func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
 			conn, err := dialConn(ctx, addr, tlsCfg)
 			if err != nil {
 				// Dial failed; wait a bit before retrying to avoid tight loop.
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 				continue
 			}
 			// Choose a method at random.
