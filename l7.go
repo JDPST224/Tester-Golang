@@ -19,13 +19,11 @@
 package main
 
 import (
-
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"log"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"net/url"
@@ -194,66 +192,6 @@ func runManager(ctx context.Context, cfg StressConfig) {
 	}
 }
 
-func makeBrowserLikeTLSConfig(hostHdr string) *tls.Config {
-    // Load system root CAs (so we verify certs like Chrome/Firefox would)
-    rootCAs, err := x509.SystemCertPool()
-    if err != nil {
-        log.Printf("warning: could not load system cert pool: %v", err)
-        // Fall back to an empty pool (will likely fail to verify most certs)
-        rootCAs = x509.NewCertPool()
-    }
-
-    return &tls.Config{
-        ServerName: hostHdr,
-
-        // ----- Versions -----
-        MinVersion: tls.VersionTLS12,
-        // Go will negotiate TLS 1.3 by default if both sides support it.
-        // If you want to force TLS 1.3 only, you can set:
-        //   MaxVersion: tls.VersionTLS13,
-
-        // ----- Curve preferences (for ECDHE) -----
-        // Browsers (Chrome/Firefox) both prefer X25519, then P-256, then P-384.
-        CurvePreferences: []tls.CurveID{
-            tls.X25519,
-            tls.CurveP256,
-            tls.CurveP384,
-        },
-
-        // ----- Cipher suites (only applies to TLS ≤1.2) -----
-        // Browsers typically offer a small set of high-security suites. Go’s default for TLS1.2
-        // is already reasonable, but you can “hard-code” to match what modern browsers advertise:
-        CipherSuites: []uint16{
-            // ECDHE-ECDSA with AES-128-GCM-SHA256
-            tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-            // ECDHE-RSA   with AES-128-GCM-SHA256
-            tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-            // ECDHE-ECDSA with CHACHA20-POLY1305
-            tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-            // ECDHE-RSA   with CHACHA20-POLY1305
-            tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-            // ECDHE-ECDSA with AES-256-GCM-SHA384
-            tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-            // ECDHE-RSA   with AES-256-GCM-SHA384
-            tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-        },
-
-        // Let Go pick the best ordering for the client. (Setting this to true only
-        // affects server behavior, so for a client it’s ignored.)
-        PreferServerCipherSuites: false,
-
-        // ----- ALPN (Application‐Layer Protocol Negotiation) -----
-        // Chrome/Firefox both advertise “h2” first, then “http/1.1”.
-        NextProtos: []string{"h2", "http/1.1"},
-
-        // ----- Root CAs for certificate verification -----
-        RootCAs: rootCAs,
-
-        // (Remove InsecureSkipVerify entirely so certificates actually get checked.)
-        InsecureSkipVerify: false,
-    }
-}
-
 // workerLoop runs as long as ctx is not canceled. It dials to the given IP,
 // then repeatedly sends bursts of HTTP requests at random intervals, draining responses.
 func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
@@ -263,7 +201,11 @@ func workerLoop(ctx context.Context, cfg StressConfig, ip string) {
 		hostHdr = cfg.CustomHost
 	}
 
-	tlsCfg := makeBrowserLikeTLSConfig(hostHdr)
+	// TLS configuration (insecure—no cert validation).
+	tlsCfg := &tls.Config{
+		ServerName:         hostHdr,
+		InsecureSkipVerify: true,
+	}
 
 	for {
 		select {
